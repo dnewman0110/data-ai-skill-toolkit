@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "01J8Z3N7K2QZ8F6XG5T9M0R4WE",
+  "skill": { "name": "data-discovery", "version": "1.0.0" },
+  "timestamp": "2026-07-29T14:03:11Z",
+  "target": {
+    "platform": "azure",
+    "catalog_type": "unity_catalog",
+    "workspace_id": "adb-example-123456789.12.azuredatabricks.net",
+    "catalog": "acme_retail_dev",
+    "schema": "silver"
+  },
+  "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+  "mode": "sampled",
+  "source_fingerprints": [
+    {
+      "object": "acme_retail_dev.silver.orders",
+      "object_type": "table",
+      "fingerprint": "sha256:8f14e45fceea167a5a36dedd4bea2543",
+      "fingerprint_method": "information_schema:column_list+row_count"
+    }
+  ],
+  "telemetry": {
+    "estimated_bytes_scanned": 52428800,
+    "estimated_rows_scanned": 500000,
+    "actual_bytes_scanned": 48210432,
+    "actual_rows_scanned": 461233,
+    "wall_clock_seconds": 42.7,
+    "estimated_cost_usd": 0.11,
+    "thresholds_applied": {
+      "max_rows_scanned": 5000000,
+      "max_bytes_scanned": 5368709120,
+      "max_wall_clock_seconds": 900
+    },
+    "stopped_at_threshold": false
+  },
+  "previous_run_id": null
+}

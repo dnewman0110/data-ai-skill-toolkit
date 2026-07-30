@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolkit.internal/contracts/model-spec.schema.json",
+  "title": "ModelSpec",
+  "description": "Output of data-modeling; input to data-discovery in resolution mode. One machine-readable spec per engagement covering the full star (facts + dimensions), Kimball-style. A human review gate sits between this artifact and discovery -- see references/toolkit-conventions.md. data-modeling only sources from a verified curated silver layer; silver_verification records that check.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run", "model_id", "business_context", "silver_verification", "facts", "dimensions", "assumptions"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "run": { "$ref": "run-manifest.schema.json" },
+    "model_id": { "type": "string" },
+    "business_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["use_cases", "business_questions"],
+      "properties": {
+        "use_cases": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "business_questions": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      }
+    },
+    "silver_verification": {
+      "type": "object",
+      "description": "data-modeling is gold-layer only. It must verify a usable curated silver layer exists before proposing a model, and refuse or flag clearly otherwise.",
+      "additionalProperties": false,
+      "required": ["verified", "layer_detected", "evidence"],
+      "properties": {
+        "verified": { "type": "boolean" },
+        "layer_detected": { "type": "string", "enum": ["bronze_or_raw", "silver_curated", "silver_uncurated", "gold", "unknown"] },
+        "evidence": {
+          "type": "string",
+          "description": "Concrete signals checked: presence of declared PK/FK constraints, documented column comments/descriptions, deduplication (no raw-ingest duplicate natural keys), conformed/standardized types and naming, absence of raw ingestion artifacts (_rescued_data, ingest batch/file columns), presence of business-meaningful (not source-system) naming."
+        },
+        "reason_if_not_verified": { "type": ["string", "null"] }
+      }
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "grain", "measures", "dimensions_referenced", "source_to_target_mappings"],
+        "properties": {
+          "name": { "type": "string" },
+          "grain": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["statement", "validated_against_measures", "validation_evidence"],
+            "properties": {
+              "statement": { "type": "string" },
+              "validated_against_measures": { "type": "boolean", "description": "True only if every measure was checked to be well-defined (additive/semi-additive/non-additive, and correctly aggregable) at exactly this grain." },
+              "validation_evidence": { "type": "string" }
+            }
+          },
+          "measures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "type", "additivity"],
+              "properties": {
+                "name": { "type": "string" },
+                "type": { "type": "string" },
+                "additivity": { "type": "string", "enum": ["additive", "semi_additive", "non_additive"] }
+              }
+            }
+          },
+          "dimensions_referenced": { "type": "array", "items": { "type": "string" } },
+          "degenerate_dimensions": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["column", "source_system_identifier"], "properties": { "column": { "type": "string" }, "source_system_identifier": { "type": "string" } } } },
+          "source_to_target_mappings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["target_column", "source_object", "source_column", "transformation"],
+              "properties": {
+                "target_column": { "type": "string" },
+                "source_object": { "type": "string" },
+                "source_column": { "type": "string" },
+                "transformation": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dimensions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind", "grain", "attributes"],
+        "properties": {
+          "name": { "type": "string" },
+          "kind": { "type": "string", "enum": ["conformed", "local", "junk", "bridge"] },
+          "conformance_group": { "type": ["string", "null"], "description": "Non-null when kind is conformed: the shared identifier used across every fact/star that references this dimension, so it is built once and reused rather than redefined per star." },
+          "grain": { "type": "string" },
+          "attributes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "scd_type", "scd_rationale", "source_mapping"],
+              "properties": {
+                "name": { "type": "string" },
+                "scd_type": { "type": "integer", "enum": [0, 1, 2, 3] },
+                "scd_rationale": { "type": "string", "description": "Why this attribute got this SCD type -- e.g. 'type 2: business asked to track historical territory reassignment for commission recalculation' vs 'type 1: correction-only field, history not meaningful'." },
+                "source_mapping": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["source_object", "source_column"],
+                  "properties": {
+                    "source_object": { "type": "string" },
+                    "source_column": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "bridge_definition": {
+            "type": ["object", "null"],
+            "description": "Non-null only when kind is bridge.",
+            "additionalProperties": false,
+            "properties": {
+              "resolves_multivalued_relationship_between": { "type": "array", "items": { "type": "string" } },
+              "weighting_factor_column": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "design_rationale_ref": { "type": ["string", "null"], "description": "Path/URI to the companion human-readable design rationale document produced alongside this machine-readable spec." },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["statement", "basis"],
+        "properties": { "statement": { "type": "string" }, "basis": { "type": "string" } }
+      }
+    }
+  }
+}

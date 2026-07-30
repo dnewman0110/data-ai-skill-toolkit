@@ -1,0 +1,33 @@
+{
+  "skill_name": "data-quality",
+  "evals": [
+    {
+      "id": 1,
+      "name": "orders-scan-with-diagnosis",
+      "prompt": "Can you run a data quality scan on silver.orders in acme_retail_dev using the fixture lakehouse at fixtures/lakehouse? Check the usual stuff -- nulls, uniqueness on the grain, the customer_id foreign key, quantity being in a sane range -- and let me know what's failing or warned and why.",
+      "expected_output": "A schema-valid quality-report.json covering silver.orders. Checks include at least: nullability/uniqueness on the grain (passes), a null_rate check on ship_region (warned, since ~2.6% of rows are null with no NOT NULL constraint), and a referential check on customer_id against silver.customers (warned or failed, since one row is orphaned). Each warned/failed check has a diagnosis with source llm_inferred, a confidence score, basis, and a suggested_fix that is clearly a proposal, not an action taken. Passed checks have no diagnosis entries.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "contract-derived-checks",
+      "prompt": "data-discovery already produced contracts/examples/data-contract.example.json for fct_orders. Can you turn its proposed tests into an actual quality scan against silver.orders in the fixture lakehouse at fixtures/lakehouse and run it?",
+      "expected_output": "A schema-valid quality-report.json where at least one check has a non-null derived_from_contract_test field pointing back at the contract_id and test_index it came from. Checks execute against real fixture data (not just echo the contract).",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "duplicate-natural-key-detected",
+      "prompt": "Can you check silver.customers in the fixture lakehouse at fixtures/lakehouse for data quality issues -- specifically I want to know if customer_number is actually unique like it's supposed to be, plus the usual null checks.",
+      "expected_output": "A schema-valid quality-report.json where the uniqueness check on customer_number has status failed (2 duplicates exist -- CUST-1042 appears 3 times), with a diagnosis explaining the likely cause (e.g. a dedup failure upstream) at a defensible confidence, and a suggested_fix framed as a proposal.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "wrong-skill-redirect-to-validation",
+      "prompt": "Can you check the data quality of gold.legacy_fct_orders compared against silver.orders in the fixture lakehouse at fixtures/lakehouse -- I want to know if they match up.",
+      "expected_output": "The skill recognizes this is a two-object comparison (source vs target), not a single-object quality scan, and points at data-validation rather than running two separate quality scans and asking the user to compare them by hand.",
+      "files": []
+    }
+  ]
+}

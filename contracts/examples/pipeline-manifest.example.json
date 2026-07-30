@@ -1,0 +1,98 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3P8R4T6M1XN7Q2V9K0YHC",
+    "skill": { "name": "data-pipeline", "version": "1.0.0" },
+    "timestamp": "2026-07-29T15:20:44Z",
+    "target": {
+      "platform": "azure",
+      "catalog_type": "unity_catalog",
+      "workspace_id": "adb-example-123456789.12.azuredatabricks.net",
+      "catalog": "acme_retail_dev",
+      "schema": "gold"
+    },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "not_applicable",
+    "source_fingerprints": [
+      {
+        "object": "acme_retail_dev.silver.orders",
+        "object_type": "table",
+        "fingerprint": "sha256:8f14e45fceea167a5a36dedd4bea2543",
+        "fingerprint_method": "information_schema:column_list+row_count"
+      }
+    ],
+    "telemetry": {
+      "estimated_bytes_scanned": 0,
+      "estimated_rows_scanned": 0,
+      "actual_bytes_scanned": 0,
+      "actual_rows_scanned": 0,
+      "wall_clock_seconds": 3.1,
+      "thresholds_applied": { "max_rows_scanned": 5000000, "max_bytes_scanned": 5368709120, "max_wall_clock_seconds": 900 },
+      "stopped_at_threshold": false
+    },
+    "previous_run_id": null
+  },
+  "pipeline_id": "acme-orders-gold-fact-pipeline-v1",
+  "source_refs": {
+    "data_contract_ref": {
+      "contract_id": "acme-orders-gold-fact-v1",
+      "schema_version": "1.0.0",
+      "path_or_uri": "~/.toolkit-runs/acme-engagement/01J8Z3N7K2QZ8F6XG5T9M0R4WE/data-contract.json"
+    },
+    "model_spec_ref": null
+  },
+  "modality_decision": {
+    "chosen": "declarative_pipeline",
+    "rubric_factors": {
+      "source_is_managed_connector": false,
+      "requires_streaming": false,
+      "transform_complexity": "simple_declarative",
+      "target_layer": "gold",
+      "modality_availability": {
+        "pyspark_notebook": true,
+        "declarative_pipeline": true,
+        "lakeflow_connect": true
+      }
+    },
+    "confidence": 0.85,
+    "basis": "0.75-0.94: silver.orders is not a Lakeflow Connect-managed source (it's already-curated silver, not a raw external system), ruling out lakeflow_connect. The transform is a straight column mapping plus a composite-key MERGE with no procedural branching or external calls (per data-contract's tests[] and column source mappings), which is exactly what Declarative Pipelines' APPLY CHANGES INTO expresses -- ruling out the more complex pyspark_notebook path per references/decision-rubric.md 'prefer declarative when the logic is expressible declaratively.'"
+  },
+  "targets": [
+    {
+      "table_name": "fct_orders",
+      "target_catalog": "acme_retail_dev",
+      "target_schema": "gold",
+      "load_pattern": "merge_upsert",
+      "merge_keys": ["order_id", "line_number"],
+      "generated_files": [
+        { "path": "generated/fct_orders/declarative_pipeline.py", "modality": "declarative_pipeline", "purpose": "pipeline_definition" },
+        { "path": "generated/fct_orders/expectations.py", "modality": "declarative_pipeline", "purpose": "expectations" }
+      ],
+      "transform_spec_ref": "generated/fct_orders/transform_spec.json",
+      "tests_carried_forward": [
+        { "source_test": "uniqueness:order_id,line_number", "generated_as": "DLT expectation: expect_or_drop('valid_grain', 'order_id IS NOT NULL AND line_number IS NOT NULL')" },
+        { "source_test": "nullability:customer_id", "generated_as": "DLT expectation: expect_or_fail('customer_id_not_null', 'customer_id IS NOT NULL')" }
+      ]
+    }
+  ],
+  "mock_data": {
+    "generated": true,
+    "location": "~/.toolkit-runs/acme-engagement/01J8Z3P8R4T6M1XN7Q2V9K0YHC/mock_data",
+    "row_counts_by_table": { "silver.orders": 50 }
+  },
+  "idempotency_check": {
+    "performed": true,
+    "method": "Rendered the target's transform_spec as a portable SQL MERGE, ran it twice against a scratch SQLite destination seeded from mock_data/silver.orders.json, and diffed the destination's row count and content hash after each run.",
+    "result": "match",
+    "evidence_ref": "generated/fct_orders/idempotency_evidence.json"
+  },
+  "readiness_level": "validated",
+  "deployment": null,
+  "assumptions": [
+    {
+      "statement": "order_total_usd's mapping from silver.orders.total_amt carried an llm_inferred confidence of 0.45 in the source data-contract and was included in the generated transform as-is, not re-derived.",
+      "basis": "data-pipeline does not re-litigate mapping confidence established upstream by data-discovery -- see references/toolkit-conventions.md #7 human review gate 1 (contract review happens before pipeline generation, not during it)."
+    }
+  ]
+}

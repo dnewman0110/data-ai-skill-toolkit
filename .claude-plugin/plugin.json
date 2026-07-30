@@ -1,0 +1,11 @@
+{
+  "name": "data-ai-skill-toolkit",
+  "displayName": "Data & AI Skill Toolkit",
+  "version": "1.0.0",
+  "description": "Five interconnected skills for a Databricks/Unity Catalog data consultancy -- data-discovery, data-modeling, data-pipeline, data-quality, data-validation -- sharing a common contract schema layer (contracts/) and a backend-agnostic lakehouse adapter (scripts/lakehouse_adapter.py). See README.md for the full artifact-chain design.",
+  "author": {
+    "name": "Dave"
+  },
+  "keywords": ["databricks", "unity-catalog", "data-engineering", "data-quality", "data-modeling"],
+  "license": "UNLICENSED"
+}

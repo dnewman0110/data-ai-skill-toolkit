@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z5C9WQEP1M4T7X0N3B6VDS",
+    "skill": { "name": "data-quality", "version": "1.0.0" },
+    "timestamp": "2026-07-29T08:00:00Z",
+    "target": {
+      "platform": "azure",
+      "catalog_type": "unity_catalog",
+      "workspace_id": "adb-example-123456789.12.azuredatabricks.net",
+      "catalog": "acme_retail_dev",
+      "schema": "gold"
+    },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "full_scan",
+    "telemetry": {
+      "estimated_bytes_scanned": 20000000,
+      "estimated_rows_scanned": 461233,
+      "actual_bytes_scanned": 19832011,
+      "actual_rows_scanned": 461233,
+      "wall_clock_seconds": 31.4,
+      "thresholds_applied": { "max_rows_scanned": 5000000, "max_bytes_scanned": 5368709120, "max_wall_clock_seconds": 900 },
+      "stopped_at_threshold": false
+    },
+    "previous_run_id": null
+  },
+  "target_object": "acme_retail_dev.gold.fct_orders",
+  "checks": [
+    {
+      "check_id": "fct_orders.customer_id.not_null",
+      "type": "null_rate",
+      "definition": "SELECT COUNT(*) FILTER (WHERE customer_id IS NULL) FROM acme_retail_dev.gold.fct_orders",
+      "derived_from_contract_test": { "contract_id": "acme-orders-gold-fact-v1", "table": "fct_orders", "test_index": 1 },
+      "status": "passed",
+      "measured_value": 0,
+      "threshold": 0,
+      "severity": "blocking",
+      "reason_not_evaluated": null
+    },
+    {
+      "check_id": "fct_orders.order_total_usd.range",
+      "type": "value_range",
+      "definition": "SELECT COUNT(*) FILTER (WHERE order_total_usd < 0 OR order_total_usd > 100000) FROM acme_retail_dev.gold.fct_orders",
+      "derived_from_contract_test": null,
+      "status": "failed",
+      "measured_value": 37,
+      "threshold": 0,
+      "severity": "warning",
+      "reason_not_evaluated": null
+    }
+  ],
+  "diagnoses": [
+    {
+      "check_id": "fct_orders.order_total_usd.range",
+      "source": "llm_inferred",
+      "root_cause": "37 rows have order_total_usd exactly equal to -1, distinct from the rest of the negative-value pattern (returns), suggesting a sentinel/default value from an upstream system rather than a real negative total.",
+      "confidence": 0.4,
+      "basis": "0.2-0.49: pattern observed in aggregated value-frequency counts (37 rows at exactly -1.00, none at other negative values), not confirmed against any source-system documentation.",
+      "suggested_fix": "Confirm with the source team whether -1 is a known sentinel for 'total not yet calculated'; if so, filter or null these out at the discovery mapping stage rather than treating as valid orders."
+    }
+  ],
+  "summary": { "passed": 1, "failed": 1, "warned": 0, "not_evaluated": 0 },
+  "assumptions": []
+}

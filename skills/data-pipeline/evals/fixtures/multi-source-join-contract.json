@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3EVAL0MULTISOURCE001",
+    "skill": { "name": "data-discovery", "version": "1.0.0" },
+    "timestamp": "2026-07-29T12:00:00Z",
+    "target": { "platform": "azure", "catalog_type": "unity_catalog", "workspace_id": "adb-example-123456789.12.azuredatabricks.net", "catalog": "acme_retail_dev", "schema": "gold" },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "sampled",
+    "source_fingerprints": [],
+    "telemetry": { "estimated_bytes_scanned": 0, "estimated_rows_scanned": 0, "thresholds_applied": { "max_rows_scanned": null, "max_bytes_scanned": null, "max_wall_clock_seconds": null } },
+    "previous_run_id": null
+  },
+  "contract_id": "acme-orders-usd-normalized-gold-v1",
+  "invocation_mode": "greenfield",
+  "source_model_spec_ref": null,
+  "grain_determination": { "method": "profiled_unique_key", "confidence_basis": "0.75-0.94: profiled uniqueness check passed against a full scan of the candidate key." },
+  "tables": [
+    {
+      "name": "fct_orders_usd_normalized",
+      "target_catalog": "acme_retail_dev",
+      "target_schema": "gold",
+      "grain": { "statement": "One row per order line item, with total converted to USD.", "determination": "profiled_unique_key", "basis": "Composite key (order_id, line_number) is unique in silver.orders.", "confidence": 0.85 },
+      "columns": [
+        { "name": "order_id", "type": "bigint", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.orders", "column": "order_id", "mapping_type": "explicit_alias" } },
+        { "name": "line_number", "type": "int", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.orders", "column": "line_number", "mapping_type": "explicit_alias" } },
+        { "name": "order_total_local", "type": "decimal(18,2)", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.orders", "column": "total_amt", "mapping_type": "explicit_alias" } },
+        { "name": "fx_rate_to_usd", "type": "decimal(10,4)", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.fx_rates", "column": "rate_to_usd", "mapping_type": "name_and_type_match" } }
+      ],
+      "tests": [
+        { "type": "uniqueness", "column": "order_id,line_number", "params": { "columns": ["order_id", "line_number"] }, "threshold_basis": "profiled", "severity": "blocking" }
+      ],
+      "sample_records": [],
+      "row_count_estimate": 0
+    }
+  ],
+  "unresolved_requirements": [],
+  "assumptions": []
+}

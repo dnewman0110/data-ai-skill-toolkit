@@ -1,0 +1,45 @@
+{
+  "skill_name": "data-quality",
+  "evals": [
+    {
+      "eval_id": 1,
+      "eval_name": "orders-scan-with-diagnosis",
+      "prompt": "Can you run a data quality scan on silver.orders in acme_retail_dev using the fixture lakehouse at fixtures/lakehouse? Check the usual stuff -- nulls, uniqueness on the grain, the customer_id foreign key, quantity being in a sane range -- and let me know what's failing or warned and why.",
+      "assertions": [
+        {"text": "Produces a quality-report.json that passes scripts/validate_artifact.py --schema-type quality-report --supported-major 1", "check": "schema_valid"},
+        {"text": "At least one check has status warned or failed", "check": "has_non_passed_check"},
+        {"text": "Every warned/failed check has a matching diagnosis with source llm_inferred, non-null confidence, non-empty basis and suggested_fix", "check": "all_non_passed_have_diagnosis"},
+        {"text": "No passed check has a diagnosis entry", "check": "no_diagnosis_for_passed"},
+        {"text": "summary counts match the actual checks[] statuses", "check": "summary_matches_checks"}
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "contract-derived-checks",
+      "prompt": "data-discovery already produced contracts/examples/data-contract.example.json for fct_orders. Can you turn its proposed tests into an actual quality scan against silver.orders in the fixture lakehouse at fixtures/lakehouse and run it?",
+      "assertions": [
+        {"text": "Produces a quality-report.json that passes scripts/validate_artifact.py --schema-type quality-report --supported-major 1", "check": "schema_valid"},
+        {"text": "At least one check has a non-null derived_from_contract_test referencing the contract_id acme-orders-gold-fact-v1", "check": "has_contract_derived_check", "contract_id": "acme-orders-gold-fact-v1"}
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "duplicate-natural-key-detected",
+      "prompt": "Can you check silver.customers in the fixture lakehouse at fixtures/lakehouse for data quality issues -- specifically I want to know if customer_number is actually unique like it's supposed to be, plus the usual null checks.",
+      "assertions": [
+        {"text": "Produces a quality-report.json that passes scripts/validate_artifact.py --schema-type quality-report --supported-major 1", "check": "schema_valid"},
+        {"text": "A uniqueness check on customer_number has status failed", "check": "check_status_equals", "column_contains": "customer_number", "type": "uniqueness", "status": "failed"},
+        {"text": "That check has a diagnosis with non-empty basis and a proposal-framed suggested_fix", "check": "diagnosis_complete_for", "column_contains": "customer_number"}
+      ]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "wrong-skill-redirect-to-validation",
+      "prompt": "Can you check the data quality of gold.legacy_fct_orders compared against silver.orders in the fixture lakehouse at fixtures/lakehouse -- I want to know if they match up.",
+      "assertions": [
+        {"text": "Response points at data-validation rather than running two independent quality scans", "check": "response_mentions", "keywords": ["data-validation"]},
+        {"text": "No quality-report.json is produced framing this as a two-object comparison", "check": "no_quality_report_produced"}
+      ]
+    }
+  ]
+}

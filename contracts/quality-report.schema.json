@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolkit.internal/contracts/quality-report.schema.json",
+  "title": "QualityReport",
+  "description": "Output of data-quality. Scan results (deterministic) plus root-cause diagnosis (LLM, always labeled). Checks may be hand-authored in toolkit.yaml/per-run config or derived from a data-contract's tests[] -- derived_from_contract_test records which.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run", "target_object", "checks", "diagnoses", "summary", "assumptions"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "run": { "$ref": "run-manifest.schema.json" },
+    "target_object": { "type": "string" },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check_id", "type", "definition", "status", "measured_value", "threshold", "severity"],
+        "properties": {
+          "check_id": { "type": "string" },
+          "type": { "type": "string", "enum": ["row_count", "null_rate", "uniqueness", "value_range", "referential", "freshness", "custom_sql"] },
+          "definition": { "type": "string", "description": "The check as configured -- SQL predicate, column + params, etc. Deterministic and reproducible from this alone." },
+          "derived_from_contract_test": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "contract_id": { "type": "string" },
+              "table": { "type": "string" },
+              "test_index": { "type": "integer" }
+            }
+          },
+          "status": { "type": "string", "enum": ["passed", "failed", "warned", "not_evaluated"] },
+          "measured_value": { "description": "The value(s) the deterministic scan produced. Type varies by check type." },
+          "threshold": { "description": "The pass/fail/warn boundary in effect." },
+          "severity": { "type": "string", "enum": ["blocking", "warning"] },
+          "reason_not_evaluated": { "type": ["string", "null"], "description": "Required (non-null) when status is not_evaluated -- e.g. column missing, source unreachable, dependency check failed first." }
+        }
+      }
+    },
+    "diagnoses": {
+      "type": "array",
+      "description": "LLM interpretation layer. Every entry here is inferred, never measured -- it exists to explain a failed/warned check, not to redo the check.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check_id", "source", "root_cause", "confidence", "basis", "suggested_fix"],
+        "properties": {
+          "check_id": { "type": "string" },
+          "source": { "type": "string", "const": "llm_inferred" },
+          "root_cause": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "basis": { "type": "string", "description": "Evidence the diagnosis was grounded in, per contracts/confidence-rubric.md." },
+          "suggested_fix": { "type": "string", "description": "A suggestion only. data-quality never applies fixes." }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "failed", "warned", "not_evaluated"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "warned": { "type": "integer", "minimum": 0 },
+        "not_evaluated": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["statement", "basis"],
+        "properties": { "statement": { "type": "string" }, "basis": { "type": "string" } }
+      }
+    }
+  }
+}

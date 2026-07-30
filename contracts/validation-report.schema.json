@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolkit.internal/contracts/validation-report.schema.json",
+  "title": "ValidationReport",
+  "description": "Output of data-validation. Staged, deterministic source-vs-target comparison (row counts -> hash aggregates -> column aggregates -> bounded row-level diff), plus LLM root-cause diagnosis on discrepancies found. Suggestions only -- data-validation never applies remediation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run", "source", "target", "normalization_applied", "stages", "discrepancies", "known_acceptable_differences_excluded", "summary", "assumptions"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "run": { "$ref": "run-manifest.schema.json" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "object"],
+      "properties": {
+        "platform": { "type": "string", "description": "e.g. 'databricks', 'snowflake', 'sql_server'. Cross-platform comparisons are supported; type_coercion_map is required when source.platform != target.platform." },
+        "object": { "type": "string" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "object"],
+      "properties": {
+        "platform": { "type": "string" },
+        "object": { "type": "string" }
+      }
+    },
+    "type_coercion_map": {
+      "type": ["array", "null"],
+      "description": "Required (non-null) when source.platform != target.platform: how each compared column's type was coerced to a common comparable type before hashing.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["column", "source_type", "target_type", "comparison_type"],
+        "properties": {
+          "column": { "type": "string" },
+          "source_type": { "type": "string" },
+          "target_type": { "type": "string" },
+          "comparison_type": { "type": "string" }
+        }
+      }
+    },
+    "normalization_applied": {
+      "type": "object",
+      "description": "Normalization is mandatory before hashing to avoid the usual false-positive sources.",
+      "additionalProperties": false,
+      "required": ["ordering", "nulls", "floats", "timezones"],
+      "properties": {
+        "ordering": { "type": "string", "description": "e.g. 'sorted by declared or inferred key columns prior to row hashing'." },
+        "nulls": { "type": "string", "description": "e.g. 'NULL coerced to a fixed sentinel distinct from any valid value prior to hashing'." },
+        "floats": { "type": "string", "description": "e.g. 'rounded to 6 decimal places before hashing'." },
+        "timezones": { "type": "string", "description": "e.g. 'all timestamps normalized to UTC before hashing'." }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "description": "Executed in order; later stages only run if the prior stage found a discrepancy (or was forced). Digging deeper only as needed keeps cost down.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage", "executed", "stopped_here", "result"],
+        "properties": {
+          "stage": { "type": "string", "enum": ["row_count", "hash_aggregate", "column_aggregate", "row_level_diff"] },
+          "executed": { "type": "boolean" },
+          "stopped_here": { "type": "boolean", "description": "True if this stage matched (no discrepancy) and the comparison stopped without going deeper." },
+          "result": { "type": "object", "description": "Stage-specific deterministic result, e.g. {source_count, target_count} or {source_hash, target_hash, match}." },
+          "row_cap": { "type": ["integer", "null"], "description": "Non-null only for the row_level_diff stage: the maximum rows pulled for line-by-line comparison." }
+        }
+      }
+    },
+    "discrepancies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "key", "stage_detected", "columns_affected", "sample_diff_ref", "diagnosis"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["missing_from_target", "extra_in_target", "changed"],
+            "description": "missing_from_target: key present in source, absent in target. extra_in_target: present in target, absent in source. changed: same key both sides, values differ."
+          },
+          "key": {
+            "type": "object",
+            "description": "The candidate/declared key column values identifying the specific row this discrepancy is about (e.g. {\"order_id\": 5230, \"line_number\": 1}). Lets a reader identify which row without opening sample_diff_ref."
+          },
+          "stage_detected": { "type": "string", "enum": ["row_count", "hash_aggregate", "column_aggregate", "row_level_diff"] },
+          "columns_affected": { "type": "array", "items": { "type": "string" } },
+          "sample_diff_ref": { "type": ["string", "null"], "description": "Pointer (path within output_dir) to the bounded, redacted full-row diff detail for this key, when the run wrote one. Null is fine for a small run where the row detail is cheap to regenerate; never inline raw client rows beyond the configured cap directly into this field." },
+          "diagnosis": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "explanation", "confidence", "basis", "suggested_fix"],
+            "properties": {
+              "source": { "type": "string", "const": "llm_inferred" },
+              "explanation": { "type": "string" },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+              "basis": { "type": "string" },
+              "suggested_fix": { "type": "string", "description": "A suggestion only; never applied by this skill." }
+            }
+          }
+        }
+      }
+    },
+    "known_acceptable_differences_excluded": {
+      "type": "array",
+      "description": "Differences explicitly declared acceptable (e.g. by toolkit.yaml or in-run config) and therefore excluded from discrepancies[] even though the deterministic comparison found them.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["description", "declared_by", "rule"],
+        "properties": {
+          "description": { "type": "string" },
+          "declared_by": { "type": "string" },
+          "rule": { "type": "string" }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deepest_stage_reached", "match"],
+      "properties": {
+        "deepest_stage_reached": { "type": "string", "enum": ["row_count", "hash_aggregate", "column_aggregate", "row_level_diff"] },
+        "match": { "type": "boolean", "description": "True if source and target are equivalent after normalization and excluding known-acceptable differences." }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["statement", "basis"],
+        "properties": { "statement": { "type": "string" }, "basis": { "type": "string" } }
+      }
+    }
+  }
+}

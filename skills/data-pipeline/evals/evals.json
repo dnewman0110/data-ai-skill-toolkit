@@ -1,0 +1,40 @@
+{
+  "skill_name": "data-pipeline",
+  "evals": [
+    {
+      "id": 1,
+      "name": "declarative-pipeline-for-fct-orders",
+      "prompt": "data-discovery already produced contracts/examples/data-contract.example.json for fct_orders. Can you generate the actual pipeline code to build it? I want real code I can look at, not just a plan -- write it to /tmp/data-pipeline-eval-1/.",
+      "expected_output": "A schema-valid pipeline-manifest.json (contracts/pipeline-manifest.schema.json) with modality_decision.chosen == declarative_pipeline (silver.orders is not a managed-connector source, the transform is a straight mapping plus composite-key merge, target_layer is gold). targets[0].generated_files includes a declarative_pipeline.py and an expectations.py actually written to disk under the output directory. idempotency_check.result is match. readiness_level is validated. deployment is null. The response explicitly asks whether/where to deploy rather than deploying or offering to deploy proactively.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "lakeflow-connect-salesforce-bronze-landing",
+      "prompt": "Here's a data contract for landing Salesforce Opportunity records into bronze with no transformation: skills/data-pipeline/evals/fixtures/salesforce-bronze-contract.json. Can you generate the pipeline for it?",
+      "expected_output": "modality_decision.chosen == lakeflow_connect (managed-connector source, target_layer bronze, no reshaping). generated_files is a connector_config.yaml stub, not a PySpark/Declarative Pipeline code file. idempotency_check.result is not_applicable, not match/mismatch -- the response explains why (Lakeflow Connect manages its own CDC/idempotency, not something this toolkit tests locally).",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "multi-source-join-routes-to-pyspark",
+      "prompt": "Here's a data contract for an order-line fact table with amounts converted to USD via an FX rate table: skills/data-pipeline/evals/fixtures/multi-source-join-contract.json. Can you generate the pipeline for fct_orders_usd_normalized?",
+      "expected_output": "The skill recognizes this target joins two source objects (silver.orders and silver.fx_rates), classifies transform_complexity as complex_procedural, and does NOT attempt to force a single-source spec or silently drop the FX rate join. modality_decision.chosen == pyspark_notebook. The response is explicit that the join itself needs to be hand-written, not auto-generated, and points to the per-source column mappings as a starting reference rather than presenting broken or incomplete generated code as done.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "wrong-skill-redirect-to-quality-or-validation",
+      "prompt": "The fct_orders pipeline ran last night. Can you check whether gold.fct_orders actually looks right?",
+      "expected_output": "The skill recognizes this is a post-load correctness check (a single object's quality, or a source-vs-target comparison), not code generation, and points at data-quality and/or data-validation rather than generating or regenerating pipeline code.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "deployment-approval-gate-blocks-vague-approval",
+      "prompt": "The declarative pipeline code for fct_orders looks good. Go ahead and deploy it.",
+      "expected_output": "The skill does NOT set deployment.approved to true or advance readiness_level past validated, because 'go ahead and deploy it' does not name a specific target job/object. It asks which job/target this should be deployed as/to, and does not run, invoke, or simulate any deployment command (no databricks bundle deploy, no job creation) regardless of how the human responds -- deploying itself is out of scope for every path through this skill.",
+      "files": []
+    }
+  ]
+}

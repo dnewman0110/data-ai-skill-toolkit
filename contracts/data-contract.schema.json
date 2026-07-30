@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolkit.internal/contracts/data-contract.schema.json",
+  "title": "DataContract",
+  "description": "Output of data-discovery; input to data-pipeline. Describes target tables grounded in real source objects: mappings, grain, tests, bounded/redacted samples, and per-mapping confidence. A human review gate sits between this artifact and pipeline generation -- see references/toolkit-conventions.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run",
+    "contract_id",
+    "invocation_mode",
+    "grain_determination",
+    "tables",
+    "assumptions"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "run": {
+      "$ref": "run-manifest.schema.json"
+    },
+    "contract_id": {
+      "type": "string",
+      "description": "Stable identifier across re-runs for the same target (e.g. hash of target table names), so a new run's diff can be matched to a previous one."
+    },
+    "invocation_mode": {
+      "type": "string",
+      "enum": [
+        "greenfield",
+        "resolution"
+      ],
+      "description": "greenfield: input was prose business intent, discovery explored broadly for candidate sources. resolution: input was a model-spec from data-modeling, discovery resolved the already-designed target against real objects."
+    },
+    "source_model_spec_ref": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Required (non-null) when invocation_mode is resolution. Points at the model-spec artifact this contract resolves.",
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string"
+        },
+        "path_or_uri": {
+          "type": "string"
+        }
+      }
+    },
+    "grain_determination": {
+      "type": "object",
+      "description": "How grain was established for this contract as a whole. Per-table grain detail lives under tables[].grain.",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "confidence_basis"
+      ],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": [
+            "explicit_constraint",
+            "profiled_unique_key",
+            "name_and_type_inference",
+            "llm_inference_from_naming",
+            "undetermined"
+          ]
+        },
+        "confidence_basis": {
+          "type": "string",
+          "description": "Reference to contracts/confidence-rubric.md category this determination corresponds to."
+        }
+      }
+    },
+    "tables": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "target_catalog",
+          "target_schema",
+          "grain",
+          "columns",
+          "tests",
+          "row_count_estimate"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "target_catalog": {
+            "type": "string"
+          },
+          "target_schema": {
+            "type": "string"
+          },
+          "grain": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "statement",
+              "determination",
+              "basis"
+            ],
+            "properties": {
+              "statement": {
+                "type": "string",
+                "description": "One row per <X>, in plain language."
+              },
+              "determination": {
+                "type": "string",
+                "enum": [
+                  "explicit_constraint",
+                  "profiled_unique_key",
+                  "name_and_type_inference",
+                  "llm_inference_from_naming",
+                  "undetermined"
+                ]
+              },
+              "confidence": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Required (non-null) when determination is an inferred category per confidence-rubric.md; null when explicit_constraint or profiled_unique_key (those are measured, not inferred)."
+              },
+              "basis": {
+                "type": "string",
+                "description": "Evidence behind the grain determination. Required whenever confidence is present, per confidence-rubric.md."
+              }
+            }
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "type",
+                "nullable",
+                "source"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "nullable": {
+                  "type": "boolean"
+                },
+                "pii_tag": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Sensitivity tag from toolkit.yaml, if any. Drives redaction in sample_records and in anything sent to an LLM."
+                },
+                "source": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "object",
+                    "column",
+                    "mapping_type"
+                  ],
+                  "properties": {
+                    "object": {
+                      "type": "string"
+                    },
+                    "column": {
+                      "type": "string"
+                    },
+                    "mapping_type": {
+                      "type": "string",
+                      "enum": [
+                        "explicit_alias",
+                        "name_and_type_match",
+                        "llm_inferred"
+                      ],
+                      "description": "explicit_alias and name_and_type_match are measured (deterministic). llm_inferred requires a confidence score per confidence-rubric.md."
+                    },
+                    "confidence": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "basis": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Required when mapping_type is llm_inferred: what evidence grounded the inference."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "column",
+                "params",
+                "threshold_basis",
+                "severity"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "nullability",
+                    "uniqueness",
+                    "referential",
+                    "range",
+                    "freshness"
+                  ]
+                },
+                "column": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object"
+                },
+                "threshold_basis": {
+                  "type": "string",
+                  "enum": [
+                    "profiled",
+                    "explicit_constraint",
+                    "default_convention"
+                  ],
+                  "description": "profiled: threshold derived from observed data (e.g. observed min/max, observed null rate). explicit_constraint: read off a real PK/FK/NOT NULL/CHECK constraint. default_convention: no evidence available, toolkit default applied -- must also appear in assumptions[]."
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "blocking",
+                    "warning"
+                  ]
+                }
+              }
+            }
+          },
+          "sample_records": {
+            "type": "array",
+            "description": "Bounded, redacted example rows. Sensitive columns (per toolkit.yaml) are hashed or redacted, never raw. Capped at the sample size configured in toolkit.yaml.",
+            "items": {
+              "type": "object"
+            },
+            "maxItems": 20
+          },
+          "row_count_estimate": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "unresolved_requirements": {
+      "type": "array",
+      "description": "resolution mode only: anything in the source model-spec that discovery could NOT satisfy against real objects. Never silently dropped.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requirement",
+          "reason"
+        ],
+        "properties": {
+          "requirement": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "description": "Every inference this artifact makes, with its basis. Never silent.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "statement",
+          "basis"
+        ],
+        "properties": {
+          "statement": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "skill_name": "data-modeling",
+  "evals": [
+    {
+      "eval_id": 1,
+      "eval_name": "orders-star-greenfield-design",
+      "prompt": "We want to build a star schema for order analytics using the fixture lakehouse at fixtures/lakehouse (silver.orders, silver.customers, silver.customer_region_history). The use cases are monthly revenue reporting by region, and customer lifetime value analysis. Business questions: 'what was our revenue by region last quarter' and 'which customers generate the most repeat revenue'. Can you design the model?",
+      "assertions": [
+        {"text": "Produces a model-spec.json that passes scripts/validate_artifact.py --schema-type model-spec --supported-major 1", "check": "schema_valid"},
+        {"text": "silver_verification.verified is true", "check": "field_equals", "field": "silver_verification.verified", "value": true},
+        {"text": "A fact named fct_orders (or similar) has grain.statement describing order-line grain and validated_against_measures true", "check": "fact_grain_present"},
+        {"text": "order_total_usd's additivity is additive and its source_to_target_mappings entry documents a cast from total_amt (TEXT)", "check": "measure_cast_documented", "source_column": "total_amt"},
+        {"text": "A dim_customer-equivalent dimension has an attribute with scd_type 2 whose scd_rationale references history/regional reassignment, not a generic justification", "check": "scd2_rationale_grounded"},
+        {"text": "design_rationale_ref is a non-null path and the referenced file was actually written", "check": "design_rationale_written"},
+        {"text": "Response states this needs human approval before data-discovery resolves it", "check": "response_mentions", "keywords": ["approval", "review"]}
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "bronze-source-refusal",
+      "prompt": "Can you design a customer star schema sourcing from bronze.raw_orders in the fixture lakehouse at fixtures/lakehouse? I know it's not fully cleaned up yet but I want to get started.",
+      "assertions": [
+        {"text": "If a model-spec.json is produced, silver_verification.verified is false and facts/dimensions are empty unless the human explicitly overrode", "check": "refusal_recorded"},
+        {"text": "Response distinguishes curation structure from data quality (doesn't say bronze.raw_orders is refused because its VALUES look wrong)", "check": "response_mentions", "keywords": ["primary key", "curat"]},
+        {"text": "Response offers the override path rather than a flat dead end, naming what would be skipped", "check": "response_mentions", "keywords": ["override"]}
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "conformed-dimension-reuse-question",
+      "prompt": "We already have a dim_customer somewhere in gold from a previous engagement. Now we're building a new support-tickets star that also needs a customer dimension. How should we handle that in the model design, using the fixture lakehouse at fixtures/lakehouse for the source objects?",
+      "assertions": [
+        {"text": "Response explicitly discusses checking grain/attribute compatibility before recommending reuse, not just the name match", "check": "response_mentions", "keywords": ["grain"]},
+        {"text": "If a dimension is marked kind conformed, conformance_group is set to a real, named identifier, not left generic", "check": "conformance_group_named_if_conformed"}
+      ]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "wrong-skill-redirect-to-discovery",
+      "prompt": "Here's a model-spec for a customer star -- can you map it to the real physical columns in our source systems and produce the contract?",
+      "assertions": [
+        {"text": "Response points at data-discovery (resolution mode) rather than performing the mapping itself", "check": "response_mentions", "keywords": ["data-discovery", "resolution"]},
+        {"text": "No data-contract.json is produced by this skill", "check": "no_data_contract_produced"}
+      ]
+    }
+  ]
+}

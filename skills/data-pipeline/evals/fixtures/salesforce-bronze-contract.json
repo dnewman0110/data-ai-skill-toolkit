@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3EVAL0SALESFORCE0001",
+    "skill": { "name": "data-discovery", "version": "1.0.0" },
+    "timestamp": "2026-07-29T12:00:00Z",
+    "target": { "platform": "azure", "catalog_type": "unity_catalog", "workspace_id": "adb-example-123456789.12.azuredatabricks.net", "catalog": "acme_retail_dev", "schema": "bronze" },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "not_applicable",
+    "source_fingerprints": [],
+    "telemetry": { "estimated_bytes_scanned": 0, "estimated_rows_scanned": 0, "thresholds_applied": { "max_rows_scanned": null, "max_bytes_scanned": null, "max_wall_clock_seconds": null } },
+    "previous_run_id": null
+  },
+  "contract_id": "acme-salesforce-opportunity-bronze-v1",
+  "invocation_mode": "greenfield",
+  "source_model_spec_ref": null,
+  "grain_determination": { "method": "explicit_constraint", "confidence_basis": "n/a -- landing table, grain is the source system's own record id" },
+  "tables": [
+    {
+      "name": "bronze_salesforce_opportunity",
+      "target_catalog": "acme_retail_dev",
+      "target_schema": "bronze",
+      "grain": { "statement": "One row per Salesforce Opportunity record.", "determination": "explicit_constraint", "basis": "Salesforce Opportunity.Id is the system's own primary key." },
+      "columns": [
+        { "name": "opportunity_id", "type": "string", "nullable": false, "pii_tag": null, "source": { "object": "salesforce_source.crm.opportunity", "column": "Id", "mapping_type": "explicit_alias" } },
+        { "name": "amount", "type": "decimal(18,2)", "nullable": true, "pii_tag": null, "source": { "object": "salesforce_source.crm.opportunity", "column": "Amount", "mapping_type": "explicit_alias" } },
+        { "name": "stage_name", "type": "string", "nullable": true, "pii_tag": null, "source": { "object": "salesforce_source.crm.opportunity", "column": "StageName", "mapping_type": "explicit_alias" } }
+      ],
+      "tests": [
+        { "type": "nullability", "column": "opportunity_id", "params": { "max_null_rate": 0 }, "threshold_basis": "explicit_constraint", "severity": "blocking" },
+        { "type": "uniqueness", "column": "opportunity_id", "params": { "columns": ["opportunity_id"] }, "threshold_basis": "explicit_constraint", "severity": "blocking" }
+      ],
+      "sample_records": [],
+      "row_count_estimate": 0
+    }
+  ],
+  "unresolved_requirements": [],
+  "assumptions": []
+}

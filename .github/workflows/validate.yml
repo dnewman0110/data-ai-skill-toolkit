@@ -1,0 +1,105 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-contracts-and-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install jsonschema pyyaml
+
+      - name: Validate every example artifact against its schema
+        run: |
+          set -e
+          for f in contracts/examples/*.example.json; do
+            echo "Validating $f"
+            python scripts/validate_artifact.py "$f" --supported-major 1
+          done
+
+      - name: Lint skill frontmatter
+        run: python scripts/lint_skill_frontmatter.py
+
+      - name: Scan for accidental client-data markers
+        run: |
+          # Cheap defense-in-depth check, not a substitute for PR review (see CONTRIBUTING.md):
+          # fail if anything outside fixtures/generate_fixtures.py and its own output introduces
+          # a committed fixture database binary or a stray *.parquet/*.csv that isn't part of the
+          # tracked fixture generator's expected outputs. Fixtures are SQLite-based (see
+          # DECISIONS.md) so the databases to watch for are .db/.db-journal under fixtures/.
+          if git ls-files | grep -E '(^|/)fixtures/lakehouse/.*\.(db|db-journal)$|\.(duckdb|parquet)$'; then
+            echo "Binary data files should not be committed -- fixtures are generated, not stored." >&2
+            exit 1
+          fi
+
+  run-skill-evals:
+    runs-on: ubuntu-latest
+    needs: validate-contracts-and-skills
+    strategy:
+      matrix:
+        skill: [data-discovery, data-modeling, data-pipeline, data-quality, data-validation]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          # Fixtures are SQLite-based (Python stdlib, no package needed) specifically so evals
+          # never require installing anything beyond this toolkit's own light dependencies --
+          # see DECISIONS.md for why (DuckDB was the original plan; not installable in the
+          # environment this toolkit was first built in, and stdlib-only is arguably better for
+          # a toolkit distributed to many client environments anyway).
+          pip install jsonschema pyyaml
+          if [ -f fixtures/requirements.txt ]; then pip install -r fixtures/requirements.txt; fi
+
+      - name: Build synthetic fixture lakehouse
+        run: python fixtures/generate_fixtures.py
+
+      - name: Run deterministic eval assertions for ${{ matrix.skill }}
+        run: |
+          if [ -f skills/${{ matrix.skill }}/evals/run_assertions.py ]; then
+            python skills/${{ matrix.skill }}/evals/run_assertions.py
+          else
+            echo "No automated assertion runner yet for ${{ matrix.skill }} -- skipping (not yet built)."
+          fi
+
+  integration-run:
+    # Proves the five skills' artifacts actually chain together (model-spec -> data-contract ->
+    # pipeline-manifest, with quality-report and validation-report attached at their gates)
+    # against the real fixture lakehouse -- not each skill's scripts tested in isolation, which is
+    # all the run-skill-evals job above can do. See fixtures/integration_check.py's own docstring
+    # for exactly what this does and does not prove (it is fully deterministic, no LLM in the
+    # loop, so it cannot substitute for the subagent-graded scenario evals documented in each
+    # skill's evals/README.md -- it exists to catch a DIFFERENT class of bug: artifact shapes that
+    # look correct in isolation but don't actually fit together).
+    runs-on: ubuntu-latest
+    needs: validate-contracts-and-skills
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install jsonschema pyyaml
+
+      - name: Build synthetic fixture lakehouse
+        run: python fixtures/generate_fixtures.py
+
+      - name: Run the modeling -> discovery -> pipeline chain, with quality and validation attached
+        run: python fixtures/integration_check.py

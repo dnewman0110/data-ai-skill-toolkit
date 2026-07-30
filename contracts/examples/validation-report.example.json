@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z6F2XN9V5H1Q8T4R7M0KBW",
+    "skill": {
+      "name": "data-validation",
+      "version": "1.0.0"
+    },
+    "timestamp": "2026-07-29T09:30:00Z",
+    "target": {
+      "platform": "azure",
+      "catalog_type": "unity_catalog",
+      "workspace_id": "adb-example-123456789.12.azuredatabricks.net",
+      "catalog": "acme_retail_dev",
+      "schema": "gold"
+    },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "sampled",
+    "telemetry": {
+      "estimated_bytes_scanned": 22581,
+      "estimated_rows_scanned": 230,
+      "actual_bytes_scanned": 22581,
+      "actual_rows_scanned": 459,
+      "wall_clock_seconds": 0.4,
+      "thresholds_applied": {
+        "max_rows_scanned": 5000000,
+        "max_bytes_scanned": 5368709120,
+        "max_wall_clock_seconds": 900
+      },
+      "stopped_at_threshold": false
+    },
+    "previous_run_id": null
+  },
+  "source": {
+    "platform": "databricks",
+    "object": "acme_retail_dev.silver.orders"
+  },
+  "target": {
+    "platform": "databricks",
+    "object": "acme_retail_dev.gold.legacy_fct_orders"
+  },
+  "type_coercion_map": [
+    {
+      "column": "total_amt",
+      "source_type": "TEXT",
+      "target_type": "REAL",
+      "comparison_type": "float, rounded to 4 decimal places"
+    }
+  ],
+  "normalization_applied": {
+    "ordering": "Rows matched by declared/candidate key (order_id,line_number), not fetch order.",
+    "nulls": "NULL normalized to a fixed sentinel distinct from any real value before hashing.",
+    "floats": "Numeric-typed or numeric-looking columns rounded to 4 decimal places before hashing.",
+    "timezones": "Columns whose values parse as timestamps normalized to UTC ISO-8601 before hashing."
+  },
+  "stages": [
+    {
+      "stage": "row_count",
+      "executed": true,
+      "stopped_here": false,
+      "result": {
+        "source_count": 230,
+        "target_count": 229
+      }
+    },
+    {
+      "stage": "hash_aggregate",
+      "executed": true,
+      "stopped_here": false,
+      "result": {
+        "source_aggregate": "c28000cfd9368d9e079a2e22cca55a0864a60723cde6b93c3540749c1ae4137b",
+        "target_aggregate": "494b9821616a1640ffc2965f4ecdb6e35f244cb978a4a031437658938d91851d",
+        "match": false
+      }
+    },
+    {
+      "stage": "column_aggregate",
+      "executed": true,
+      "stopped_here": false,
+      "result": {
+        "columns_with_aggregate_mismatch": [
+          "customer_id",
+          "line_number",
+          "order_id",
+          "total_amt"
+        ]
+      }
+    },
+    {
+      "stage": "row_level_diff",
+      "executed": true,
+      "stopped_here": true,
+      "result": {
+        "rows_compared": 230,
+        "missing_from_target_count": 1,
+        "extra_in_target_count": 0,
+        "changed_count": 0,
+        "rows_returned_with_full_detail": 1
+      },
+      "row_cap": 5000
+    }
+  ],
+  "discrepancies": [
+    {
+      "kind": "missing_from_target",
+      "key": { "order_id": 5230, "line_number": 1 },
+      "stage_detected": "row_level_diff",
+      "columns_affected": [],
+      "sample_diff_ref": null,
+      "diagnosis": {
+        "source": "llm_inferred",
+        "explanation": "Order 5230/line 1 exists in silver.orders but is absent from gold.legacy_fct_orders. Cross-referencing silver.orders shows this row's customer_id (99999) has no matching row in silver.customers -- the gold table's own documented build note says it is produced via an INNER JOIN to customers, so a row with an unresolvable customer_id would be silently dropped rather than carried through with a null/unknown customer attribution.",
+        "confidence": 0.55,
+        "basis": "0.5-0.74: cross-referenced the missing key directly against source data (confirmed orphaned customer_id) and against gold.legacy_fct_orders's own table comment describing an inner-join build, but the actual pipeline/query that built gold.legacy_fct_orders was not inspected directly.",
+        "suggested_fix": "Decide, with the business, whether orders with an unresolvable customer_id should be included (via a LEFT JOIN, attributed to an 'unknown customer' surrogate) or genuinely excluded from fct_orders by design; if included, rebuild the gold table's join logic accordingly. This skill does not apply this fix."
+      }
+    }
+  ],
+  "known_acceptable_differences_excluded": [],
+  "summary": {
+    "deepest_stage_reached": "row_level_diff",
+    "match": false
+  },
+  "assumptions": []
+}

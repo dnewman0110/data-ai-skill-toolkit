@@ -1,0 +1,33 @@
+{
+  "skill_name": "data-discovery",
+  "evals": [
+    {
+      "id": 1,
+      "name": "greenfield-order-revenue",
+      "prompt": "Hey -- for the Acme Retail engagement, the client wants to report order revenue by region. Can you dig into the silver schema in acme_retail_dev and figure out what data we actually have to support that, then turn it into a data contract? Heads up, they've mentioned having duplicate customer records before, so keep an eye out for that kind of thing. Use the fixture lakehouse at fixtures/lakehouse for now.",
+      "expected_output": "A schema-valid data-contract.json in greenfield mode covering silver.orders (and likely silver.customers). Grain determined as one row per order line (order_id, line_number) at explicit_constraint/profiled_unique_key confidence. At least one llm_inferred column mapping with a confidence score and basis (e.g. total_amt -> a revenue/total column). assumptions[] surfaces the orphaned customer_id, the ship_region nulls, and (if silver.customers is profiled) the duplicated customer_number. Human review gate mentioned in the summary.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "resolution-mode-model-spec",
+      "prompt": "data-modeling already produced and I approved contracts/examples/model-spec.example.json for the Acme orders star. Can you run data-discovery in resolution mode against it, using the fixture lakehouse at fixtures/lakehouse, and produce the data contract for data-pipeline?",
+      "expected_output": "A schema-valid data-contract.json in resolution mode, source_model_spec_ref populated referencing the model-spec, mappings resolved against real silver.orders/silver.customers columns (explicit_alias, not llm_inferred, since the spec already specifies them), and any model-spec requirement that can't be satisfied against the fixture data reported in unresolved_requirements[] rather than dropped.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "cost-gate-halts-on-tight-threshold",
+      "prompt": "Profile silver.orders in the fixture lakehouse at fixtures/lakehouse for a data contract, but our client has a strict cost policy this engagement -- cap it at 10 rows scanned max, don't go over that without checking with me first.",
+      "expected_output": "The skill runs the pre-flight cost estimate, sees estimated rows (230) exceeds the 10-row cap, halts BEFORE profiling any column data, reports the estimated rows/bytes and which threshold was exceeded, and explicitly asks before proceeding rather than silently using a smaller sample or proceeding anyway.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "wrong-skill-redirect-to-modeling",
+      "prompt": "Can you design a star schema for our order data -- figure out the facts, dimensions, grain, and SCD strategy from our business questions around revenue and customer lifetime value?",
+      "expected_output": "The skill recognizes this is a dimensional-design request, not a discovery request, and says so -- pointing at data-modeling rather than attempting to invent facts/dimensions/SCD strategy itself. It does not fabricate a star schema.",
+      "files": []
+    }
+  ]
+}

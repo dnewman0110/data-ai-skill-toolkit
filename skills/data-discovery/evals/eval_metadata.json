@@ -1,0 +1,50 @@
+{
+  "skill_name": "data-discovery",
+  "evals": [
+    {
+      "eval_id": 1,
+      "eval_name": "greenfield-order-revenue",
+      "prompt": "Hey -- for the Acme Retail engagement, the client wants to report order revenue by region. Can you dig into the silver schema in acme_retail_dev and figure out what data we actually have to support that, then turn it into a data contract? Heads up, they've mentioned having duplicate customer records before, so keep an eye out for that kind of thing. Use the fixture lakehouse at fixtures/lakehouse for now.",
+      "assertions": [
+        {"text": "Produces a data-contract.json that passes scripts/validate_artifact.py --schema-type data-contract --supported-major 1", "check": "schema_valid"},
+        {"text": "invocation_mode is 'greenfield'", "check": "field_equals", "field": "invocation_mode", "value": "greenfield"},
+        {"text": "Grain for the orders table is (order_id, line_number) determined at explicit_constraint or profiled_unique_key", "check": "grain_correct"},
+        {"text": "At least one column mapping has mapping_type llm_inferred with a non-null confidence and non-empty basis", "check": "has_llm_inferred_mapping_with_basis"},
+        {"text": "assumptions[] surfaces the orphaned customer_id (broken FK planted flaw)", "check": "assumptions_mention", "keywords": ["customer_id", "99999"]},
+        {"text": "assumptions[] surfaces the ship_region null-rate finding (nullable-that-shouldn't-be planted flaw)", "check": "assumptions_mention", "keywords": ["ship_region"]},
+        {"text": "Response mentions the human review gate before pipeline generation", "check": "response_mentions", "keywords": ["review", "human"]}
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "resolution-mode-model-spec",
+      "prompt": "data-modeling already produced and I approved contracts/examples/model-spec.example.json for the Acme orders star. Can you run data-discovery in resolution mode against it, using the fixture lakehouse at fixtures/lakehouse, and produce the data contract for data-pipeline?",
+      "assertions": [
+        {"text": "Produces a data-contract.json that passes scripts/validate_artifact.py --schema-type data-contract --supported-major 1", "check": "schema_valid"},
+        {"text": "invocation_mode is 'resolution'", "check": "field_equals", "field": "invocation_mode", "value": "resolution"},
+        {"text": "source_model_spec_ref is populated (non-null)", "check": "field_not_null", "field": "source_model_spec_ref"},
+        {"text": "unresolved_requirements is present as an array (empty or not)", "check": "field_is_array", "field": "unresolved_requirements"},
+        {"text": "At least one column mapping resolved from the spec is explicit_alias, not llm_inferred", "check": "has_explicit_alias_mapping"}
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "cost-gate-halts-on-tight-threshold",
+      "prompt": "Profile silver.orders in the fixture lakehouse at fixtures/lakehouse for a data contract, but our client has a strict cost policy this engagement -- cap it at 10 rows scanned max, don't go over that without checking with me first.",
+      "assertions": [
+        {"text": "Response reports the pre-flight cost estimate (estimated rows) before any profiling", "check": "response_mentions", "keywords": ["230", "estimated"]},
+        {"text": "Response explicitly halts and asks before proceeding rather than silently sampling or proceeding", "check": "response_mentions", "keywords": ["ask", "confirm"]},
+        {"text": "No data-contract.json is produced in this run", "check": "no_contract_produced"}
+      ]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "wrong-skill-redirect-to-modeling",
+      "prompt": "Can you design a star schema for our order data -- figure out the facts, dimensions, grain, and SCD strategy from our business questions around revenue and customer lifetime value?",
+      "assertions": [
+        {"text": "Response points at data-modeling rather than performing dimensional design itself", "check": "response_mentions", "keywords": ["data-modeling"]},
+        {"text": "Response does not fabricate a star schema / model-spec-shaped artifact", "check": "no_model_spec_produced"}
+      ]
+    }
+  ]
+}

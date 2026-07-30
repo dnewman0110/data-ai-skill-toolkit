@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z4A1P3RZC7NQF0V6H2K8YT",
+    "skill": { "name": "data-modeling", "version": "1.0.0" },
+    "timestamp": "2026-07-28T09:12:00Z",
+    "target": {
+      "platform": "azure",
+      "catalog_type": "unity_catalog",
+      "workspace_id": "adb-example-123456789.12.azuredatabricks.net",
+      "catalog": "acme_retail_dev",
+      "schema": "silver"
+    },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "sampled",
+    "telemetry": {
+      "estimated_bytes_scanned": 10485760,
+      "estimated_rows_scanned": 100000,
+      "actual_bytes_scanned": 9820112,
+      "actual_rows_scanned": 94500,
+      "wall_clock_seconds": 18.2,
+      "thresholds_applied": { "max_rows_scanned": 5000000, "max_bytes_scanned": 5368709120, "max_wall_clock_seconds": 900 },
+      "stopped_at_threshold": false
+    },
+    "previous_run_id": null
+  },
+  "model_id": "acme-orders-star-v1",
+  "business_context": {
+    "use_cases": ["Monthly revenue reporting by region and product category", "Customer lifetime value analysis"],
+    "business_questions": ["What was our revenue by region last quarter?", "Which customers generate the most repeat revenue?"]
+  },
+  "silver_verification": {
+    "verified": true,
+    "layer_detected": "silver_curated",
+    "evidence": "acme_retail_dev.silver.orders has declared PRIMARY KEY on (order_id, line_number), documented column comments on all 14 columns, standardized naming (snake_case business terms, no source-system prefixes), and no _rescued_data or ingest batch columns present.",
+    "reason_if_not_verified": null
+  },
+  "facts": [
+    {
+      "name": "fct_orders",
+      "grain": {
+        "statement": "One row per order line item.",
+        "validated_against_measures": true,
+        "validation_evidence": "order_total_usd and quantity are additive at the (order_id, line_number) grain; verified no double-counting by comparing SUM(order_total_usd) grouped at grain vs. header-level total on a 500-row sample."
+      },
+      "measures": [
+        { "name": "order_total_usd", "type": "decimal(18,2)", "additivity": "additive" },
+        { "name": "quantity", "type": "int", "additivity": "additive" }
+      ],
+      "dimensions_referenced": ["dim_customer", "dim_product", "dim_date"],
+      "degenerate_dimensions": [
+        { "column": "order_id", "source_system_identifier": "silver.orders.order_id" }
+      ],
+      "source_to_target_mappings": [
+        { "target_column": "order_total_usd", "source_object": "acme_retail_dev.silver.orders", "source_column": "total_amt", "transformation": "CAST(total_amt AS DECIMAL(18,2)) -- source column is declared TEXT pending a source-system fix per its column comment; downstream consumers must cast, not assume it's already numeric." },
+        { "target_column": "quantity", "source_object": "acme_retail_dev.silver.orders", "source_column": "quantity", "transformation": "direct" }
+      ]
+    }
+  ],
+  "dimensions": [
+    {
+      "name": "dim_customer",
+      "kind": "conformed",
+      "conformance_group": "customer",
+      "grain": "One row per customer per version (SCD type 2 on region).",
+      "attributes": [
+        {
+          "name": "region",
+          "scd_type": 2,
+          "scd_rationale": "Business question requires attributing historical revenue to the region a customer was in AT THE TIME of the order, not their current region, per stated use case 'revenue by region last quarter'.",
+          "source_mapping": { "source_object": "acme_retail_dev.silver.customers", "source_column": "region" }
+        },
+        {
+          "name": "email",
+          "scd_type": 1,
+          "scd_rationale": "Contact detail correction; no business requirement to preserve history, so overwrite in place.",
+          "source_mapping": { "source_object": "acme_retail_dev.silver.customers", "source_column": "email" }
+        }
+      ],
+      "bridge_definition": null
+    }
+  ],
+  "design_rationale_ref": "output_dir/acme-engagement/data-modeling/acme-orders-star-v1/design-rationale.md",
+  "assumptions": [
+    {
+      "statement": "Assumed 'revenue' in business questions means order_total_usd net of returns; silver.orders does not separate returns into a distinct table.",
+      "basis": "No returns table found in silver schema; flagged for human confirmation before this measure is treated as authoritative for finance reporting."
+    }
+  ]
+}

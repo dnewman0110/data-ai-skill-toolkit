@@ -1,0 +1,33 @@
+{
+  "skill_name": "data-validation",
+  "evals": [
+    {
+      "id": 1,
+      "name": "source-vs-target-real-discrepancy",
+      "prompt": "We just pointed the reporting team at gold.legacy_fct_orders in acme_retail_dev, but I want to double check it actually matches silver.orders before they start relying on it. Can you validate silver.orders against gold.legacy_fct_orders (key: order_id, line_number) using the fixture lakehouse at fixtures/lakehouse, and tell me if anything's off and why?",
+      "expected_output": "A schema-valid validation-report.json. Comparison proceeds through row_count -> hash_aggregate -> column_aggregate -> row_level_diff (since counts differ, 230 vs 229). Finds exactly one discrepancy: kind missing_from_target, key {order_id: 5230, line_number: 1}. total_amt is NOT falsely flagged as a discrepancy on any other row (type coercion between TEXT and REAL works). Diagnosis explains the likely inner-join-drops-orphaned-customer root cause, labeled llm_inferred with a confidence score and basis. Human review gate mentioned; no fix applied.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "clean-match-stops-early",
+      "prompt": "Quick sanity check -- can you validate silver.orders against itself in the fixture lakehouse at fixtures/lakehouse (key: order_id, line_number) just to confirm the comparison logic reports a clean match?",
+      "expected_output": "A schema-valid validation-report.json with summary.match true, deepest_stage_reached hash_aggregate, zero discrepancies. column_aggregate and row_level_diff reported as not executed, since the comparison correctly stopped once content hashes matched.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "known-acceptable-difference-declared",
+      "prompt": "Same as before -- validate silver.orders against gold.legacy_fct_orders in the fixture lakehouse at fixtures/lakehouse (key: order_id, line_number) -- but the client already told us order 5230 (the one with the bad customer_id) is a known issue they've accepted and don't want flagged every time. Can you declare that as a known-acceptable difference and re-run?",
+      "expected_output": "A validation-report.json where discrepancies[] is empty (or does not include the order_id 5230/line_number 1 key) and known_acceptable_differences_excluded[] contains an entry for it with a description and declared_by. summary.match is true given only the excluded difference exists.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "wrong-skill-redirect-to-quality",
+      "prompt": "Can you check silver.orders in the fixture lakehouse at fixtures/lakehouse for data quality issues -- null rates, uniqueness, that kind of thing? There's no second table to compare it against, just want to know if the data itself looks clean.",
+      "expected_output": "The skill recognizes there's no target object to compare against and this is a single-object quality scan, not a comparison -- points at data-quality rather than inventing a target or attempting an assertion-based scan itself.",
+      "files": []
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+# toolkit.yaml -- project-level configuration for the data & AI skill toolkit.
+#
+# Copy this file to toolkit.yaml at the root of your client project (the repo/folder
+# where you pinned this toolkit, per README.md "Pinning"), fill in the values for this
+# engagement, and never commit the filled-in copy if it contains anything client-identifying
+# beyond what's already covered by .gitignore in the CLIENT project (this toolkit repo's own
+# .gitignore only protects the toolkit repo itself).
+#
+# Every skill reads this file at the start of a run. If a key a skill needs is missing, the
+# skill halts with a message naming the exact missing key -- it does not prompt for a secret
+# in chat and does not guess a default for anything security- or cost-relevant.
+
+toolkit_schema_version: "1.0.0"
+
+project:
+  name: "<engagement-name>"          # used in output_dir path and in run manifests' identity, not secret
+  client_display_name: "<client>"    # for humans reading reports only -- never written into artifact filenames
+
+environment:
+  platform: azure                    # azure | aws | gcp
+  catalog_type: unity_catalog        # unity_catalog | hive_metastore
+  dbr_runtime: "latest-lts"          # e.g. "15.4-lts" to pin explicitly; "latest-lts" resolved at run time
+  compute: serverless_preferred      # serverless_preferred | serverless_only | classic_only
+  declarative_pipelines_available: true   # DLT / Lakeflow Declarative Pipelines (Spark Declarative Pipelines)
+  lakeflow_connect_available: true
+  orchestration: databricks_jobs     # databricks_jobs | dagster | adf | varies
+  transformation_framework: native   # native | dbt
+
+auth:
+  method: service_principal_oauth_m2m   # service_principal_oauth_m2m | pat | other
+  secret_store: databricks_secrets      # databricks_secrets | azure_key_vault | env_vars
+  # Secret SCOPE NAMES only below -- never a token, client secret, or connection string.
+  connections:
+    silver_source:
+      workspace_id: "<adb-xxxxxxxxxxxxxxxx.xx.azuredatabricks.net>"
+      secret_scope: "<databricks-secret-scope-name>"
+      client_id_key: "<key-name-within-scope-for-sp-client-id>"
+      client_secret_key: "<key-name-within-scope-for-sp-client-secret>"
+
+python:
+  version: "3.11"
+
+paths:
+  output_dir: "~/.toolkit-runs/${project.name}/${run_id}"   # every run's artifacts land here, never inside this repo
+  scratch_schema: "acme_dev.toolkit_scratch"                 # temp objects named with run_id, dropped after use
+
+cost_and_blast_radius:
+  max_rows_scanned: 5000000
+  max_bytes_scanned: 5368709120        # 5 GiB
+  max_wall_clock_seconds: 900
+  default_sample_size: 10000           # rows profiled by default before a full-scale/full-scan is considered
+  full_scan_requires_explicit_opt_in: true
+
+sample_data:
+  max_sample_records: 20               # cap on example/sample rows emitted into any artifact
+  sensitive_columns:                   # column-name patterns (regex) redacted/hashed wherever sampled or sent to an LLM
+    - pattern: "(?i)ssn|social_security"
+      action: redact
+    - pattern: "(?i)email"
+      action: hash
+    - pattern: "(?i)phone"
+      action: hash
+    - pattern: "(?i)(credit_card|card_number|cvv)"
+      action: redact
+
+quality:
+  default_thresholds:
+    null_rate_warning: 0.01
+    null_rate_blocking: 0.05
+
+validation:
+  content_check_row_cap: 100000        # max rows per side fetched for hash/column-aggregate content comparison;
+                                        # above this, only row_count is compared and the deeper stages are
+                                        # reported as skipped rather than silently omitted -- see
+                                        # skills/data-validation/references/staged-comparison.md
+  row_level_diff_row_cap: 5000         # of the rows found to differ, max number surfaced with full detail
+  known_acceptable_differences: []     # see data-validation/references for the declaration format
+
+overrides:
+  # Client-specific extensions live here or in a project-local skills/<name>/overrides/ directory.
+  # See README.md "Client-specific overrides" -- overrides never flow back upstream into this toolkit
+  # repo with client specifics baked in.
+  enabled: false

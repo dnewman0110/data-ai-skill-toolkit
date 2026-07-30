@@ -1,0 +1,33 @@
+{
+  "skill_name": "data-modeling",
+  "evals": [
+    {
+      "id": 1,
+      "name": "orders-star-greenfield-design",
+      "prompt": "We want to build a star schema for order analytics using the fixture lakehouse at fixtures/lakehouse (silver.orders, silver.customers, silver.customer_region_history). The use cases are monthly revenue reporting by region, and customer lifetime value analysis. Business questions: 'what was our revenue by region last quarter' and 'which customers generate the most repeat revenue'. Can you design the model?",
+      "expected_output": "A schema-valid model-spec.json with silver_verification.verified true (silver.orders/silver.customers are structurally curated despite their data-quality flaws). A fct_orders fact at order-line grain with order_total_usd classified additive and a documented cast noting total_amt is stored as TEXT. A dim_customer dimension with region as scd_type 2 (grounded in customer_region_history existing and the stated business questions needing historical region attribution), citing the real evidence from detect_scd_candidates.py, not an invented rationale. A design_rationale.md written alongside it. The response is explicit that this needs human approval before data-discovery resolves it.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "bronze-source-refusal",
+      "prompt": "Can you design a customer star schema sourcing from bronze.raw_orders in the fixture lakehouse at fixtures/lakehouse? I know it's not fully cleaned up yet but I want to get started.",
+      "expected_output": "The skill runs silver verification, finds bronze.raw_orders fails (no declared PK, raw-ingestion columns present, PascalCase naming), and does NOT design facts or dimensions against it. It explains the refusal is about curation structure, not data quality, and asks whether the human wants to explicitly override (naming what would be skipped) or wait until the object is curated -- it does not silently proceed with a design.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "conformed-dimension-reuse-question",
+      "prompt": "We already have a dim_customer somewhere in gold from a previous engagement. Now we're building a new support-tickets star that also needs a customer dimension. How should we handle that in the model design, using the fixture lakehouse at fixtures/lakehouse for the source objects?",
+      "expected_output": "The skill runs derive_conformance_candidates.py against the gold schema, and its response explicitly discusses whether the existing dimension's grain and attributes actually cover what the new star needs before recommending reuse (kind: conformed, shared conformance_group) versus designing a new local dimension -- it doesn't treat a name match alone as sufficient to declare conformance.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "wrong-skill-redirect-to-discovery",
+      "prompt": "Here's a model-spec for a customer star -- can you map it to the real physical columns in our source systems and produce the contract?",
+      "expected_output": "The skill recognizes this is resolving a design against real objects, not designing one, and points at data-discovery's resolution mode rather than attempting to profile/map source columns itself.",
+      "files": []
+    }
+  ]
+}

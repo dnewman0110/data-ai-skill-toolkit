@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3N7K2QZ8F6XG5T9M0R4WE",
+    "skill": { "name": "data-discovery", "version": "1.0.0" },
+    "timestamp": "2026-07-29T14:03:11Z",
+    "target": {
+      "platform": "azure",
+      "catalog_type": "unity_catalog",
+      "workspace_id": "adb-example-123456789.12.azuredatabricks.net",
+      "catalog": "acme_retail_dev",
+      "schema": "silver"
+    },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "sampled",
+    "source_fingerprints": [
+      {
+        "object": "acme_retail_dev.silver.orders",
+        "object_type": "table",
+        "fingerprint": "sha256:8f14e45fceea167a5a36dedd4bea2543",
+        "fingerprint_method": "information_schema:column_list+row_count"
+      }
+    ],
+    "telemetry": {
+      "estimated_bytes_scanned": 52428800,
+      "estimated_rows_scanned": 500000,
+      "actual_bytes_scanned": 48210432,
+      "actual_rows_scanned": 461233,
+      "wall_clock_seconds": 42.7,
+      "thresholds_applied": { "max_rows_scanned": 5000000, "max_bytes_scanned": 5368709120, "max_wall_clock_seconds": 900 },
+      "stopped_at_threshold": false
+    },
+    "previous_run_id": null
+  },
+  "contract_id": "acme-orders-gold-fact-v1",
+  "invocation_mode": "greenfield",
+  "source_model_spec_ref": null,
+  "grain_determination": {
+    "method": "profiled_unique_key",
+    "confidence_basis": "0.75-0.94: profiled uniqueness check passed against a full scan of the candidate key."
+  },
+  "tables": [
+    {
+      "name": "fct_orders",
+      "target_catalog": "acme_retail_dev",
+      "target_schema": "gold",
+      "grain": {
+        "statement": "One row per order line item.",
+        "determination": "profiled_unique_key",
+        "basis": "Composite key (order_id, line_number) is 100% unique and 0% null across a full scan of 461,233 rows in silver.orders.",
+        "confidence": 0.85
+      },
+      "columns": [
+        {
+          "name": "order_id",
+          "type": "bigint",
+          "nullable": false,
+          "pii_tag": null,
+          "source": { "object": "acme_retail_dev.silver.orders", "column": "order_id", "mapping_type": "explicit_alias" }
+        },
+        {
+          "name": "line_number",
+          "type": "int",
+          "nullable": false,
+          "pii_tag": null,
+          "source": { "object": "acme_retail_dev.silver.orders", "column": "line_number", "mapping_type": "explicit_alias" }
+        },
+        {
+          "name": "customer_id",
+          "type": "bigint",
+          "nullable": false,
+          "pii_tag": null,
+          "source": { "object": "acme_retail_dev.silver.orders", "column": "customer_id", "mapping_type": "name_and_type_match" }
+        },
+        {
+          "name": "order_total_usd",
+          "type": "decimal(18,2)",
+          "nullable": false,
+          "pii_tag": null,
+          "source": {
+            "object": "acme_retail_dev.silver.orders",
+            "column": "total_amt",
+            "mapping_type": "llm_inferred",
+            "confidence": 0.45,
+            "basis": "0.2-0.49: column name 'total_amt' and decimal type are consistent with an order total, but no comment, constraint, or naming convention confirms it; not corroborated by profiling beyond plausible value ranges."
+          }
+        }
+      ],
+      "tests": [
+        {
+          "type": "uniqueness",
+          "column": "order_id,line_number",
+          "params": { "columns": ["order_id", "line_number"] },
+          "threshold_basis": "profiled",
+          "severity": "blocking"
+        },
+        {
+          "type": "nullability",
+          "column": "customer_id",
+          "params": { "max_null_rate": 0 },
+          "threshold_basis": "explicit_constraint",
+          "severity": "blocking"
+        }
+      ],
+      "sample_records": [
+        { "order_id": 100234, "line_number": 1, "customer_id": 88123, "order_total_usd": 129.99 }
+      ],
+      "row_count_estimate": 461233
+    }
+  ],
+  "unresolved_requirements": [],
+  "assumptions": [
+    {
+      "statement": "Mapped silver.orders.total_amt to fct_orders.order_total_usd based on naming and type plausibility only.",
+      "basis": "No table/column comment, constraint, or explicit alias found in source metadata; recommend a human confirm this mapping before pipeline generation."
+    }
+  ]
+}

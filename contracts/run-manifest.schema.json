@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolkit.internal/contracts/run-manifest.schema.json",
+  "title": "RunManifest",
+  "description": "Common envelope embedded (as the `run` property) in every artifact produced by the toolkit. Captures what produced an artifact, against what target, at what cost. Consumers refuse artifacts whose run.schema_version major component they do not support.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "skill",
+    "timestamp",
+    "target",
+    "invoking_identity",
+    "mode",
+    "telemetry"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semver of THIS run-manifest schema. Major version bumps are breaking: a skill that only understands major version 1 must refuse a manifest with major version 2, and say so explicitly rather than best-effort parsing it."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Opaque unique identifier for this run, e.g. a UUIDv4 or ULID. Used to name scratch objects and to correlate an artifact with its diff-against-previous-run.",
+      "minLength": 8
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": ["data-discovery", "data-modeling", "data-pipeline", "data-quality", "data-validation"]
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Version from the skill's own SKILL.md frontmatter at run time, independent of the toolkit's overall semver."
+        }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp the run started, RFC 3339."
+    },
+    "target": {
+      "type": "object",
+      "description": "Identifies WHERE this ran, never HOW to authenticate to it. No secrets, tokens, or connection strings belong here -- see toolkit-conventions.md.",
+      "additionalProperties": false,
+      "required": ["platform", "catalog_type", "workspace_id", "catalog"],
+      "properties": {
+        "platform": { "type": "string", "enum": ["azure", "aws", "gcp"] },
+        "catalog_type": { "type": "string", "enum": ["unity_catalog", "hive_metastore"] },
+        "workspace_id": {
+          "type": "string",
+          "description": "Databricks workspace identifier or workspace URL host component (e.g. adb-1234567890.1.azuredatabricks.net). Not a secret, but still client-identifying -- this is exactly why artifacts live in output_dir, outside the toolkit repo."
+        },
+        "catalog": { "type": "string" },
+        "schema": { "type": "string" }
+      }
+    },
+    "invoking_identity": {
+      "type": "string",
+      "description": "The principal that ran the skill, e.g. a service principal application ID or a human user's email. Never a token, secret, or password -- an identity label only."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["sampled", "full_scan", "not_applicable"],
+      "description": "Whether this run operated on a sample or scanned target objects in full. not_applicable is for runs with no scan component (e.g. pure code generation)."
+    },
+    "source_fingerprints": {
+      "type": "array",
+      "description": "Content fingerprints of source objects this run consumed, used to detect 'nothing changed' between runs without diffing full contents.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["object", "object_type", "fingerprint", "fingerprint_method"],
+        "properties": {
+          "object": { "type": "string", "description": "Fully qualified object name, e.g. catalog.schema.table." },
+          "object_type": { "type": "string", "enum": ["table", "view", "file", "notebook", "job", "artifact"] },
+          "fingerprint": { "type": "string", "description": "Hash value. Never the raw data used to compute it." },
+          "fingerprint_method": { "type": "string", "description": "e.g. 'information_schema:column_list+row_count', 'delta:table_version', 'sha256:schema_json'." }
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "Cost and blast-radius accounting. estimated_* is populated before any full-scale operation runs (and is the basis for the max_rows_scanned / max_bytes_scanned / max_wall_clock gate); actual_* is filled in after, so teams learn the real numbers over time.",
+      "additionalProperties": false,
+      "required": ["estimated_bytes_scanned", "estimated_rows_scanned", "thresholds_applied"],
+      "properties": {
+        "estimated_bytes_scanned": { "type": "integer", "minimum": 0 },
+        "estimated_rows_scanned": { "type": "integer", "minimum": 0 },
+        "actual_bytes_scanned": { "type": "integer", "minimum": 0 },
+        "actual_rows_scanned": { "type": "integer", "minimum": 0 },
+        "wall_clock_seconds": { "type": "number", "minimum": 0 },
+        "estimated_cost_usd": { "type": "number", "minimum": 0 },
+        "thresholds_applied": {
+          "type": "object",
+          "description": "The max_rows_scanned / max_bytes_scanned / max_wall_clock values in effect for this run (from toolkit.yaml or override), recorded so a reader can tell whether a run was close to a limit.",
+          "additionalProperties": false,
+          "properties": {
+            "max_rows_scanned": { "type": ["integer", "null"] },
+            "max_bytes_scanned": { "type": ["integer", "null"] },
+            "max_wall_clock_seconds": { "type": ["integer", "null"] }
+          }
+        },
+        "stopped_at_threshold": {
+          "type": "boolean",
+          "description": "True if the run halted and asked for confirmation because a threshold would have been exceeded."
+        }
+      }
+    },
+    "previous_run_id": {
+      "type": ["string", "null"],
+      "description": "run_id of the prior run this one supersedes, if any. Used to locate the diff summary artifact. Null for a first run."
+    }
+  }
+}

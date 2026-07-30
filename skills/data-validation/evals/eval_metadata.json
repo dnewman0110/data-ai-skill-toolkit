@@ -1,0 +1,49 @@
+{
+  "skill_name": "data-validation",
+  "evals": [
+    {
+      "eval_id": 1,
+      "eval_name": "source-vs-target-real-discrepancy",
+      "prompt": "We just pointed the reporting team at gold.legacy_fct_orders in acme_retail_dev, but I want to double check it actually matches silver.orders before they start relying on it. Can you validate silver.orders against gold.legacy_fct_orders (key: order_id, line_number) using the fixture lakehouse at fixtures/lakehouse, and tell me if anything's off and why?",
+      "assertions": [
+        {"text": "Produces a validation-report.json that passes scripts/validate_artifact.py --schema-type validation-report --supported-major 1", "check": "schema_valid"},
+        {"text": "deepest_stage_reached is row_level_diff", "check": "field_equals_nested", "path": ["summary", "deepest_stage_reached"], "value": "row_level_diff"},
+        {"text": "Exactly one discrepancy found, kind missing_from_target, key order_id=5230/line_number=1", "check": "discrepancy_matches", "kind": "missing_from_target", "key": {"order_id": 5230, "line_number": 1}},
+        {"text": "No discrepancy involves total_amt (type coercion prevents a false positive)", "check": "no_column_in_any_discrepancy", "column": "total_amt"},
+        {"text": "The one discrepancy's diagnosis has source llm_inferred, non-null confidence, non-empty basis and suggested_fix", "check": "diagnosis_complete"},
+        {"text": "Response mentions the human review gate / that no fix was applied", "check": "response_mentions", "keywords": ["review", "not appl"]}
+      ]
+    },
+    {
+      "eval_id": 2,
+      "eval_name": "clean-match-stops-early",
+      "prompt": "Quick sanity check -- can you validate silver.orders against itself in the fixture lakehouse at fixtures/lakehouse (key: order_id, line_number) just to confirm the comparison logic reports a clean match?",
+      "assertions": [
+        {"text": "Produces a validation-report.json that passes scripts/validate_artifact.py --schema-type validation-report --supported-major 1", "check": "schema_valid"},
+        {"text": "summary.match is true", "check": "field_equals_nested", "path": ["summary", "match"], "value": true},
+        {"text": "deepest_stage_reached is hash_aggregate (stopped early)", "check": "field_equals_nested", "path": ["summary", "deepest_stage_reached"], "value": "hash_aggregate"},
+        {"text": "discrepancies is empty", "check": "field_is_empty_array", "field": "discrepancies"}
+      ]
+    },
+    {
+      "eval_id": 3,
+      "eval_name": "known-acceptable-difference-declared",
+      "prompt": "Same as before -- validate silver.orders against gold.legacy_fct_orders in the fixture lakehouse at fixtures/lakehouse (key: order_id, line_number) -- but the client already told us order 5230 (the one with the bad customer_id) is a known issue they've accepted and don't want flagged every time. Can you declare that as a known-acceptable difference and re-run?",
+      "assertions": [
+        {"text": "Produces a validation-report.json that passes scripts/validate_artifact.py --schema-type validation-report --supported-major 1", "check": "schema_valid"},
+        {"text": "known_acceptable_differences_excluded is non-empty and references the 5230/1 key", "check": "known_acceptable_differences_populated"},
+        {"text": "discrepancies does not include the 5230/1 key", "check": "discrepancy_absent", "key": {"order_id": 5230, "line_number": 1}},
+        {"text": "summary.match is true", "check": "field_equals_nested", "path": ["summary", "match"], "value": true}
+      ]
+    },
+    {
+      "eval_id": 4,
+      "eval_name": "wrong-skill-redirect-to-quality",
+      "prompt": "Can you check silver.orders in the fixture lakehouse at fixtures/lakehouse for data quality issues -- null rates, uniqueness, that kind of thing? There's no second table to compare it against, just want to know if the data itself looks clean.",
+      "assertions": [
+        {"text": "Response points at data-quality rather than performing a comparison-less scan itself", "check": "response_mentions", "keywords": ["data-quality"]},
+        {"text": "No validation-report.json is produced (no target to compare against)", "check": "no_validation_report_produced"}
+      ]
+    }
+  ]
+}
