@@ -96,41 +96,67 @@ which install path you use.
 ## Installing as a plugin
 
 This repo is a [Claude Code plugin](https://code.claude.com/docs/en/plugins-reference)
-(`.claude-plugin/plugin.json` at the repo root) as well as a standalone toolkit -- installing it as a
-plugin is what actually makes Claude Code discover and invoke the five skills from inside a project
-session; pinning a copy into the repo (above) without this step just leaves the files sitting there
-unused.
+(`.claude-plugin/plugin.json` at the repo root) with its own `.claude-plugin/marketplace.json`, so it's
+also the marketplace that distributes it -- installing it as a plugin is what actually makes Claude Code
+discover and invoke the five skills from inside a project session; pinning a copy into the repo (above)
+without this step just leaves the files sitting there unused.
 
-Every `SKILL.md` resolves its shared paths (`scripts/`, `contracts/`) via `${CLAUDE_PLUGIN_ROOT}` and
-its own bundled scripts via `${CLAUDE_SKILL_DIR}`, both of which Claude Code substitutes inline
-regardless of the working directory -- so the plugin works the same way whether it's installed via
-either path below.
+Every `SKILL.md` resolves its shared paths (`scripts/`, `contracts/`) via `${CLAUDE_PLUGIN_ROOT}` and its
+own bundled scripts via `${CLAUDE_SKILL_DIR}`, both of which Claude Code substitutes inline regardless of
+the working directory -- so the plugin works the same way no matter where it's installed from.
 
-**Fastest: vendor it into one repo, no marketplace.** Claude Code auto-loads any folder under a skills
-directory that contains `.claude-plugin/plugin.json`, with no install step:
+**Install via the marketplace:**
 
 ```
-git submodule add --branch main https://github.com/<org>/data-ai-skill-toolkit .claude/skills/data-ai-skill-toolkit
-cd .claude/skills/data-ai-skill-toolkit && git checkout v1.2.0 && cd -
-git add .gitmodules .claude/skills/data-ai-skill-toolkit
-git commit -m "Install data-ai-skill-toolkit v1.2.0 as a Claude Code plugin"
+/plugin marketplace add https://github.com/<org>/data-ai-skill-toolkit
+/plugin install data-ai-skill-toolkit@data-ai-skill-toolkit
 ```
 
-Note the destination: it must be `.claude/skills/<name>/` (project-scope, reaches every collaborator who
-clones the repo and accepts the workspace trust dialog) or `~/.claude/skills/<name>/` (personal-scope,
-every project on your machine) -- not an arbitrary path like `.toolkit/`. If you already pinned the
-toolkit elsewhere per "Pinning" above, either move that submodule to one of these two locations or add a
-second submodule/symlink pointing there; Claude Code only auto-discovers plugins from these specific
-directories. Start (or restart) `claude` from the repo root afterward; the five skills load namespaced as
+(Swap the URL for a local filesystem path to test a checkout before pushing it.) Restart Claude Code (or
+run `/reload-skills` / `/reload-plugins`) afterward; the five skills load namespaced as
 `/data-ai-skill-toolkit:data-discovery`, `/data-ai-skill-toolkit:data-modeling`, etc., and Claude also
 triggers them automatically by matching your request against each skill's `description`.
 
-**For reuse across many client repos: a real marketplace plugin.** Add a `.claude-plugin/marketplace.json`
-to this repo (not yet built as of this writing -- see `DECISIONS.md`) and install with
-`/plugin marketplace add <org>/data-ai-skill-toolkit` then `/plugin install data-ai-skill-toolkit@data-ai-skill-toolkit`
-in any project. Updates then propagate via `/plugin marketplace update` instead of re-vendoring a copy
-into every client repo -- worth doing once this toolkit is being pushed into more than a couple of
-engagements.
+**For a team, so every collaborator gets the same version without each running the install commands
+themselves:** check a block like this into the project's `.claude/settings.json`, pinned to a released
+tag via `ref`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "data-ai-skill-toolkit": {
+      "source": {
+        "source": "github",
+        "repo": "<org>/data-ai-skill-toolkit",
+        "ref": "v1.2.0"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "data-ai-skill-toolkit@data-ai-skill-toolkit": true
+  }
+}
+```
+
+Anyone who clones the project and accepts its workspace trust dialog gets the pinned version; bumping the
+pin is a one-line `ref` change reviewable in a diff, the same discipline as the submodule SHA in
+"Pinning" above. Since this now covers reproducibility for the plugin itself, "Pinning" above is only
+needed if a project *also* wants the toolkit's raw files physically present in its repo (e.g. for
+scripts run outside Claude Code, or an audit trail) -- it's independent of, not required for, getting the
+skills loaded.
+
+**What doesn't work:** dropping the plugin bundle directly under `.claude/skills/<name>/` and relying on
+Claude Code to auto-discover the nested `.claude-plugin/plugin.json` one level down. That was this
+toolkit's previous recommendation and it does not reliably load the skills -- Claude Code's directory
+auto-discovery expects a bare `SKILL.md` right at `.claude/skills/<name>/SKILL.md`, not a full plugin
+bundle with its own `skills/` subdirectory nested inside. Use the marketplace install above instead.
+
+**If you'd rather have short, unnamespaced names** (`/data-discovery` instead of
+`/data-ai-skill-toolkit:data-discovery`) and don't need plugin packaging: copy each `skills/<name>/`
+folder directly into the target project's `.claude/skills/<name>/`, without `.claude-plugin/plugin.json`.
+This drops the `${CLAUDE_PLUGIN_ROOT}`/`${CLAUDE_SKILL_DIR}` substitution, so you'll also need to bring
+along the shared `contracts/` and root `scripts/` directories and adjust each `SKILL.md`'s path
+references accordingly.
 
 ## Mid-engagement updates
 

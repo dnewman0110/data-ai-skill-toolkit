@@ -1,0 +1,13 @@
+{
+  "name": "data-ai-skill-toolkit",
+  "owner": {
+    "name": "Dave"
+  },
+  "plugins": [
+    {
+      "name": "data-ai-skill-toolkit",
+      "source": "./",
+      "description": "Five interconnected skills for a Databricks/Unity Catalog data consultancy -- data-discovery, data-modeling, data-pipeline, data-quality, data-validation."
+    }
+  ]
+}

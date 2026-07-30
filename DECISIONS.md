@@ -727,4 +727,36 @@ just accepted on the subagent's word.
     rather the Pinning section's own example just point straight at `.claude/skills/` to avoid the
     two-step story.
 
+## Post-Phase-3 -- fast path retracted, marketplace built (mine, need your review)
+
+52. **The "fast path" from #51 doesn't work; replaced it with a real marketplace.** You tested #51's
+    recommended fast path in an actual target project: vendor the plugin bundle into
+    `.claude/skills/data-ai-skill-toolkit/` and let Claude Code auto-discover the nested
+    `.claude-plugin/plugin.json`. Result, from your own `/reload-skills` output: none of the five
+    skills loaded -- only unrelated pre-existing skills showed up in the active list. Root cause:
+    Claude Code's directory auto-discovery expects a bare `SKILL.md` directly at
+    `.claude/skills/<name>/SKILL.md`; it doesn't reliably walk into a nested plugin bundle whose own
+    skills live a level deeper at `.claude/skills/<plugin-name>/skills/<name>/SKILL.md`. So the
+    "fastest, no marketplace" story in #51 was wrong and has been retracted from `README.md` rather
+    than left as a documented footgun.
+
+    Built the marketplace that #51 deferred: added `.claude-plugin/marketplace.json` at the repo root,
+    a minimal self-hosting entry (`source: "./"`) that lists this repo's own plugin, so the same repo
+    is both the plugin and the marketplace that distributes it -- no separate marketplace repo needed
+    for a single-plugin toolkit like this one.
+
+    Rewrote `README.md`'s "Installing as a plugin" section: the marketplace flow
+    (`/plugin marketplace add` + `/plugin install`) is now the primary path, with a team-reproducible
+    variant (`extraKnownMarketplaces` + `enabledPlugins` pinned via `ref` in the target project's
+    `.claude/settings.json`) replacing what the submodule-vendor fast path was trying to achieve. The
+    old `.claude/skills/`-vendoring recommendation is called out explicitly as not working, and a
+    flatten-for-short-names alternative (copy `skills/<name>/` directly into a project without
+    `plugin.json`) is documented as a fallback for anyone who doesn't want the plugin namespace, with
+    its `${CLAUDE_PLUGIN_ROOT}`/`${CLAUDE_SKILL_DIR}` caveat spelled out.
+
+    Not yet verified end-to-end against a real target project (install, restart, confirm all five
+    skills appear namespaced as `/data-ai-skill-toolkit:data-discovery` etc., and that a skill's
+    bundled script still resolves `contracts/`/`scripts/` correctly under the marketplace-install
+    path) -- do that next before treating this as closed.
+
 *(Further decisions will be appended here as later phases proceed.)*
