@@ -8,8 +8,10 @@ running, not optional background reading.
 
 Environment this toolkit targets by default: Databricks on Azure, Unity Catalog, latest LTS DBR,
 serverless-preferred compute (falls back to classic), Databricks Jobs for orchestration, native
-PySpark/SQL (no dbt), service principal OAuth M2M auth with secrets resolved from Databricks Secrets.
-A project's `toolkit.yaml` can override any of this per engagement -- see `toolkit.example.yaml`.
+PySpark/SQL (no dbt), Databricks Connect for the `databricks_connect` backend -- reusing whatever
+session is already authenticated in the host environment, rather than the toolkit managing its own
+auth/secrets for that backend (see #2 below). A project's `toolkit.yaml` can override any of this
+per engagement -- see `toolkit.example.yaml`.
 
 ## 1. Read/write boundaries
 
@@ -31,16 +33,21 @@ in plain language -- not just by reference to this file.
 
 ## 2. Credentials and secrets
 
-- Skills read connection config from a project-level `toolkit.yaml` and resolve secrets at runtime from
-  the configured secret store (Databricks Secrets by default; a project may configure Azure Key Vault or
-  environment variables instead). Credentials are never inlined in `toolkit.yaml`, in generated code, or
-  anywhere else in the repo.
+- Skills read connection config (`environment.backend`, `environment.catalog`, etc.) from a project-level
+  `toolkit.yaml`. For the `databricks_connect` backend, that's the whole story: `DatabricksConnectAdapter`
+  reuses whichever Databricks Connect session is already authenticated in the host environment (a
+  `databricks-connect` profile, OAuth, env vars -- however the project's own Databricks Connect setup
+  works) and neither this toolkit nor `toolkit.yaml` handles auth, tokens, or secret resolution for it. A
+  project may still need a secret store (Databricks Secrets, Azure Key Vault, environment variables) for
+  its *own* purposes outside this toolkit, but no adapter in `scripts/lakehouse_adapter.py` reads one
+  directly. Credentials are never inlined in `toolkit.yaml`, in generated code, or anywhere else in the
+  repo.
 - Credentials, tokens, and connection strings never appear in: generated artifacts, logs, reports,
   prompts sent to an LLM, or anything written to the repo. If a script needs to log a connection attempt,
   it logs the secret *scope name*, never the resolved value.
 - If required config is missing, the skill **halts with a specific message naming the missing key**
-  (e.g. "toolkit.yaml is missing `connections.silver_source.secret_scope`"). It does not prompt for a
-  secret in chat, and it does not guess a plausible-looking default.
+  (e.g. "toolkit.yaml is missing `environment.catalog`"). It does not prompt for a secret in chat, and it
+  does not guess a plausible-looking default.
 
 ## 3. Client data isolation
 

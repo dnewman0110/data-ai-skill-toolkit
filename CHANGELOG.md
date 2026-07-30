@@ -103,8 +103,41 @@ README.md "Versioning" for how this relates to per-skill and per-schema versions
   installable via CLI into any project (`.claude/skills/data-ai-skill-toolkit/` for a single-repo
   install, or a future marketplace listing for reuse across many client repos). Documented in
   `README.md`'s new "Installing as a plugin" section. See DECISIONS.md decision 51.
+- `.claude-plugin/marketplace.json` -- a minimal self-hosting marketplace (`source: "./"`) so this
+  repo distributes its own plugin via `/plugin marketplace add` + `/plugin install`, since the
+  `.claude/skills/`-vendoring auto-discovery documented in decision 51 turned out not to work in
+  practice. `README.md`'s "Installing as a plugin" section rewritten accordingly. See DECISIONS.md
+  decision 52.
+- `scripts/lakehouse_adapter.py` gained `build_adapter(backend, ...)`, a single factory a build
+  script calls with an already-resolved `backend` string (from toolkit.yaml's new
+  `environment.backend`) to get either adapter, instead of every skill's build script hardcoding
+  `SQLiteFixtureAdapter` directly. See DECISIONS.md decision 53.
 
 ### Changed
+- `scripts/lakehouse_adapter.py`: replaced `DatabricksAdapter` (databricks-sql-connector, explicit
+  `server_hostname`/`http_path`/`access_token`, never actually instantiated anywhere in this repo)
+  with `DatabricksConnectAdapter` (Databricks Connect, reuses whatever Spark session is already
+  authenticated in the host environment -- no auth/token logic in the toolkit at all for this
+  backend). `toolkit.example.yaml`'s `auth:` block (service-principal/secret-scope config) removed
+  along with it; replaced by `environment.backend` and `environment.catalog`.
+  `skills/data-discovery/scripts/build_findings.py` gained a `--backend` flag wired to the new
+  `build_adapter()` factory (other four skills' build scripts still hardcode `SQLiteFixtureAdapter`
+  -- same treatment is a follow-up, not done in this change). See DECISIONS.md decision 53.
+- `scripts/lakehouse_adapter.py`: fixed two bugs in `DatabricksConnectAdapter` found by testing
+  against a real workspace (`samples.bakehouse.sales_customers`) -- `:name` SQL parameters must be
+  passed via `spark.sql()`'s `args=` dict, not `**kwargs` (which does `{name}`-style substitution
+  instead); and every `information_schema` reference now qualifies the catalog explicitly
+  (`{catalog}.information_schema....`), since Unity Catalog's information_schema is per-catalog and
+  an unqualified reference silently resolves against `current_catalog()` instead of erroring. The
+  second bug was latent in the original `DatabricksAdapter` (decision 51) too. See DECISIONS.md
+  decision 54.
+- `scripts/redact.py`: `_column_action` now normalizes camelCase/PascalCase/kebab-case column names
+  to snake_case before matching `sensitive_columns` patterns. Patterns are written snake_case
+  (`card_number`) but source columns aren't always named that way -- `cardNumber` previously slipped
+  through unredacted. Caught live: a real profiling run against a camelCase-columned source left an
+  unredacted card-number sample in the working findings file before the final contract was written
+  (the final artifact was clean; the gap was in the regex, not that run's output). See DECISIONS.md
+  decision 53.
 - All five `SKILL.md` files: every executable path reference (`python scripts/validate_artifact.py`,
   `skills/<name>/scripts/*.py`, etc.) now uses `${CLAUDE_PLUGIN_ROOT}` (toolkit-root shared
   `scripts/`/`contracts/`) or `${CLAUDE_SKILL_DIR}` (each skill's own bundled scripts) instead of

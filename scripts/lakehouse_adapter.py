@@ -11,12 +11,19 @@ Two backends:
     skill's evals never requires installing anything. Simulates Unity Catalog's catalog.schema.table
     addressing by ATTACHing one SQLite file per schema (bronze.db, silver.db, gold.db) to a single
     connection and addressing tables as "<schema>.<table>".
-  - DatabricksAdapter: used in production. Talks to a Databricks SQL warehouse via the
-    databricks-sql-connector package, using native catalog.schema.table addressing and
-    information_schema for metadata. Not exercised by this toolkit's own evals (no live
-    workspace in CI) -- correctness here rests on matching the documented
-    databricks-sql-connector/information_schema APIs, not on a test run. Any skill built
+  - DatabricksConnectAdapter: used in production. Talks to Unity Catalog via Databricks Connect --
+    whatever authenticated Spark session is already configured in the host environment (a
+    databricks-connect profile, DATABRICKS_HOST/DATABRICKS_TOKEN, OAuth, etc. -- this class does
+    not configure or manage that, it just grabs the ambient session), using native
+    catalog.schema.table addressing and information_schema for metadata. Not exercised by this
+    toolkit's own evals (no live workspace in CI) -- correctness here rests on matching the
+    documented databricks-connect/information_schema APIs, not on a test run. Any skill built
     against LakehouseAdapter's interface should work against either backend unmodified.
+
+`build_adapter()` below is the one place a caller picks between them, given an already-resolved
+`backend` string (sqlite_fixture | databricks_connect) -- callers get that string from
+toolkit.yaml's `environment.backend` themselves and pass it straight through; this module never
+reads toolkit.yaml directly (see references/toolkit-conventions.md #2).
 
 Every method that touches real row data (profile_column, sample_rows) takes an explicit
 `limit`/`sample_size` -- callers (skills) are responsible for respecting toolkit.yaml's cost
@@ -302,53 +309,65 @@ class SQLiteFixtureAdapter(LakehouseAdapter):
         return row[0]
 
 
-class DatabricksAdapter(LakehouseAdapter):
-    """Production backend: Databricks SQL warehouse via databricks-sql-connector, native
-    catalog.schema.table addressing, metadata from information_schema. Constructed from
-    toolkit.yaml's `auth`/`environment.connections` block -- secrets are resolved by the
-    caller from the configured secret store and passed in already-resolved; this class never
-    reads toolkit.yaml or a secret store directly (see references/toolkit-conventions.md #2).
+class DatabricksConnectAdapter(LakehouseAdapter):
+    """Production backend: Databricks Connect, native catalog.schema.table addressing, metadata
+    from information_schema -- same queries a Databricks SQL warehouse would run, executed via a
+    Spark session instead of a DBAPI connection. Constructed from toolkit.yaml's
+    `environment.catalog`; auth is never this class's concern (see references/toolkit-conventions.md
+    #2) -- it either accepts an existing SparkSession or calls
+    `DatabricksSession.builder.getOrCreate()`, which assumes Databricks Connect is already
+    configured and authenticated in the host environment (profile, OAuth, env vars -- whatever the
+    project's own Databricks Connect setup already provides). This class does not read toolkit.yaml,
+    a secret store, or perform any auth/token-exchange step itself.
 
     Not exercised by this toolkit's automated evals (they run against SQLiteFixtureAdapter,
-    offline). Implemented against the documented databricks-sql-connector and
-    information_schema APIs; validate against a real workspace before relying on it in a new
-    environment shape (e.g. Hive Metastore instead of Unity Catalog changes some
-    information_schema behavior -- see references/ for known differences).
+    offline). Implemented against the documented Databricks Connect and information_schema APIs;
+    validate against a real workspace before relying on it in a new environment shape (e.g. Hive
+    Metastore instead of Unity Catalog changes some information_schema behavior -- see references/
+    for known differences).
     """
 
-    def __init__(self, server_hostname: str, http_path: str, access_token: str, catalog: str):
-        try:
-            from databricks import sql as databricks_sql
-        except ImportError as e:
-            raise ImportError(
-                "DatabricksAdapter requires the 'databricks-sql-connector' package. "
-                "Install with: pip install databricks-sql-connector"
-            ) from e
-        self._sql = databricks_sql
+    def __init__(self, catalog: str, spark=None):
+        if spark is not None:
+            self.spark = spark
+        else:
+            try:
+                from databricks.connect import DatabricksSession
+            except ImportError as e:
+                raise ImportError(
+                    "DatabricksConnectAdapter requires the 'databricks-connect' package. "
+                    "Install with: pip install databricks-connect"
+                ) from e
+            self.spark = DatabricksSession.builder.getOrCreate()
         self.catalog = catalog
-        self.connection = databricks_sql.connect(
-            server_hostname=server_hostname, http_path=http_path, access_token=access_token,
-            catalog=catalog,
-        )
 
-    def _query(self, sql: str, params: tuple = ()) -> list[dict]:
-        with self.connection.cursor() as cur:
-            cur.execute(sql, params)
-            cols = [d[0] for d in cur.description]
-            return [dict(zip(cols, row)) for row in cur.fetchall()]
+    def _query(self, sql: str, **params) -> list[dict]:
+        # Must go through the `args=` dict, not **kwargs -- spark.sql()'s **kwargs does Python-
+        # string-style {name} substitution, not `:name` SQL-literal parameter binding. Only `args=`
+        # binds the `:catalog`/`:schema`/`:table` placeholders used throughout this class.
+        df = self.spark.sql(sql, args=params) if params else self.spark.sql(sql)
+        return [row.asDict() for row in df.collect()]
 
     def list_tables(self, schema: str) -> list[str]:
+        # Unity Catalog's information_schema is per-catalog, not global -- an unqualified
+        # `information_schema.tables` resolves against current_catalog(), which is whatever the
+        # session's default catalog is, NOT necessarily self.catalog. Every information_schema
+        # query below must be qualified with `{self.catalog}.information_schema....` or it silently
+        # returns zero rows the moment self.catalog isn't the session default (caught by testing
+        # against a real workspace with samples as the target catalog, not the session default).
         rows = self._query(
-            "SELECT table_name FROM information_schema.tables WHERE table_catalog = ? AND table_schema = ?",
-            (self.catalog, schema),
+            f"SELECT table_name FROM {self.catalog}.information_schema.tables "
+            "WHERE table_schema = :schema",
+            schema=schema,
         )
         return [r["table_name"] for r in rows]
 
     def get_columns(self, schema: str, table: str) -> list[ColumnInfo]:
         rows = self._query(
-            "SELECT column_name, full_data_type, is_nullable, comment FROM information_schema.columns "
-            "WHERE table_catalog = ? AND table_schema = ? AND table_name = ? ORDER BY ordinal_position",
-            (self.catalog, schema, table),
+            f"SELECT column_name, full_data_type, is_nullable, comment FROM {self.catalog}.information_schema.columns "
+            "WHERE table_schema = :schema AND table_name = :table "
+            "ORDER BY ordinal_position",
+            schema=schema, table=table,
         )
         return [ColumnInfo(name=r["column_name"], type=r["full_data_type"],
                             nullable=(r["is_nullable"] == "YES"), comment=r.get("comment"))
@@ -356,28 +375,28 @@ class DatabricksAdapter(LakehouseAdapter):
 
     def get_table_comment(self, schema: str, table: str) -> str | None:
         rows = self._query(
-            "SELECT comment FROM information_schema.tables "
-            "WHERE table_catalog = ? AND table_schema = ? AND table_name = ?",
-            (self.catalog, schema, table),
+            f"SELECT comment FROM {self.catalog}.information_schema.tables "
+            "WHERE table_schema = :schema AND table_name = :table",
+            schema=schema, table=table,
         )
         return rows[0]["comment"] if rows else None
 
     def get_constraints(self, schema: str, table: str) -> Constraints:
         pk_rows = self._query(
-            "SELECT kcu.column_name FROM information_schema.key_column_usage kcu "
-            "JOIN information_schema.table_constraints tc ON kcu.constraint_name = tc.constraint_name "
-            "WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_catalog = ? AND tc.table_schema = ? "
-            "AND tc.table_name = ? ORDER BY kcu.ordinal_position",
-            (self.catalog, schema, table),
+            f"SELECT kcu.column_name FROM {self.catalog}.information_schema.key_column_usage kcu "
+            f"JOIN {self.catalog}.information_schema.table_constraints tc ON kcu.constraint_name = tc.constraint_name "
+            "WHERE tc.constraint_type = 'PRIMARY KEY' "
+            "AND tc.table_schema = :schema AND tc.table_name = :table ORDER BY kcu.ordinal_position",
+            schema=schema, table=table,
         )
         fk_rows = self._query(
-            "SELECT kcu.column_name, ccu.table_schema AS ref_schema, ccu.table_name AS ref_table, "
-            "ccu.column_name AS ref_column FROM information_schema.key_column_usage kcu "
-            "JOIN information_schema.table_constraints tc ON kcu.constraint_name = tc.constraint_name "
-            "JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name "
-            "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_catalog = ? AND tc.table_schema = ? "
-            "AND tc.table_name = ?",
-            (self.catalog, schema, table),
+            f"SELECT kcu.column_name, ccu.table_schema AS ref_schema, ccu.table_name AS ref_table, "
+            f"ccu.column_name AS ref_column FROM {self.catalog}.information_schema.key_column_usage kcu "
+            f"JOIN {self.catalog}.information_schema.table_constraints tc ON kcu.constraint_name = tc.constraint_name "
+            f"JOIN {self.catalog}.information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name "
+            "WHERE tc.constraint_type = 'FOREIGN KEY' "
+            "AND tc.table_schema = :schema AND tc.table_name = :table",
+            schema=schema, table=table,
         )
         cols = self.get_columns(schema, table)
         not_null = [c.name for c in cols if not c.nullable]
@@ -473,3 +492,19 @@ class DatabricksAdapter(LakehouseAdapter):
             return None
         first_row = rows[0]
         return next(iter(first_row.values()))
+
+
+def build_adapter(backend: str, lakehouse_dir: str | Path | None = None,
+                   catalog: str = "acme_retail_dev", spark=None) -> LakehouseAdapter:
+    """Instantiates the right backend given an already-resolved `backend` value (sqlite_fixture |
+    databricks_connect). Callers get that string from toolkit.yaml's `environment.backend`
+    themselves and pass it straight through -- this function never reads toolkit.yaml directly
+    (see references/toolkit-conventions.md #2).
+    """
+    if backend == "sqlite_fixture":
+        if lakehouse_dir is None:
+            raise ValueError("backend 'sqlite_fixture' requires lakehouse_dir")
+        return SQLiteFixtureAdapter(lakehouse_dir, catalog=catalog)
+    if backend == "databricks_connect":
+        return DatabricksConnectAdapter(catalog=catalog, spark=spark)
+    raise ValueError(f"Unknown backend '{backend}' -- expected 'sqlite_fixture' or 'databricks_connect'.")

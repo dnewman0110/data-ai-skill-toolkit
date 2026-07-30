@@ -19,23 +19,17 @@ project:
 environment:
   platform: azure                    # azure | aws | gcp
   catalog_type: unity_catalog        # unity_catalog | hive_metastore
+  catalog: "<unity-catalog-name>"    # only used by the databricks_connect backend; ignored by sqlite_fixture
+  backend: databricks_connect        # sqlite_fixture (offline, against fixtures/) | databricks_connect
+                                      # (production -- reuses whatever Databricks Connect session is
+                                      # already authenticated in this environment; the toolkit itself
+                                      # never handles auth/secrets for this backend, see README.md)
   dbr_runtime: "latest-lts"          # e.g. "15.4-lts" to pin explicitly; "latest-lts" resolved at run time
   compute: serverless_preferred      # serverless_preferred | serverless_only | classic_only
   declarative_pipelines_available: true   # DLT / Lakeflow Declarative Pipelines (Spark Declarative Pipelines)
   lakeflow_connect_available: true
   orchestration: databricks_jobs     # databricks_jobs | dagster | adf | varies
   transformation_framework: native   # native | dbt
-
-auth:
-  method: service_principal_oauth_m2m   # service_principal_oauth_m2m | pat | other
-  secret_store: databricks_secrets      # databricks_secrets | azure_key_vault | env_vars
-  # Secret SCOPE NAMES only below -- never a token, client secret, or connection string.
-  connections:
-    silver_source:
-      workspace_id: "<adb-xxxxxxxxxxxxxxxx.xx.azuredatabricks.net>"
-      secret_scope: "<databricks-secret-scope-name>"
-      client_id_key: "<key-name-within-scope-for-sp-client-id>"
-      client_secret_key: "<key-name-within-scope-for-sp-client-secret>"
 
 python:
   version: "3.11"
@@ -53,7 +47,10 @@ cost_and_blast_radius:
 
 sample_data:
   max_sample_records: 20               # cap on example/sample rows emitted into any artifact
-  sensitive_columns:                   # column-name patterns (regex) redacted/hashed wherever sampled or sent to an LLM
+  sensitive_columns:                   # column-name patterns (regex) redacted/hashed wherever sampled or sent
+                                        # to an LLM -- write patterns snake_case; scripts/redact.py normalizes
+                                        # camelCase/PascalCase/kebab-case column names before matching, so
+                                        # cardNumber/CardNumber/card-number all still hit "card_number" below
     - pattern: "(?i)ssn|social_security"
       action: redact
     - pattern: "(?i)email"

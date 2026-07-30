@@ -759,4 +759,102 @@ just accepted on the subagent's word.
     bundled script still resolves `contracts/`/`scripts/` correctly under the marketplace-install
     path) -- do that next before treating this as closed.
 
+53. **Real data-discovery run against a live Databricks Connect session surfaced two gaps: a
+    redaction regex miss and a genuinely unimplemented Databricks backend.** You installed the
+    toolkit via the #52 marketplace path and ran `data-discovery` for real. Two findings came back:
+
+    First, a real bug: `toolkit.yaml`'s credit-card pattern (`(?i)(credit_card|card_number|cvv)`) is
+    written snake_case, but the actual source column was `cardNumber` -- no underscore, so it never
+    matched, and an unredacted (synthetic) card number briefly sat in the working findings file
+    before you caught it and re-profiled; the final contract shipped clean. The regex itself was
+    still wrong for the next table with a differently-cased column, though. Fixed at the root:
+    `scripts/redact.py`'s `_column_action` now normalizes camelCase/PascalCase/kebab-case to
+    snake_case (`cardNumber` -> `card_number`) before matching, so every existing pattern in
+    `toolkit.example.yaml` catches all four naming styles without being rewritten. Verified against
+    `cardNumber`/`CardNumber`/`CREDIT_CARD`/`credit-card`/`socialSecurity` by hand.
+
+    Second, an architectural gap, not a bug: `build_findings.py` only ever imported
+    `SQLiteFixtureAdapter` -- there was no code path to a live backend at all, despite `SKILL.md`
+    describing one. The `DatabricksAdapter` that existed (`databricks-sql-connector`, explicit
+    `server_hostname`/`http_path`/`access_token`, a service-principal/OAuth-M2M model per the
+    original README) was never instantiated anywhere in the repo, including in evals, and you'd
+    reproduced the run's actual profiling logic by hand against this project's already-authenticated
+    Databricks Connect session rather than through the toolkit's own script path.
+
+    You confirmed: (a) replace `DatabricksAdapter` outright rather than keep it alongside a new
+    adapter -- it was dead code, never wired to anything; (b) the new adapter should reuse whatever
+    Databricks Connect session is already authenticated in the host environment
+    (`DatabricksSession.builder.getOrCreate()`, or an injected session for testing) rather than
+    have the toolkit manage its own auth -- matching what you did by hand; (c) backend selection
+    should be a `toolkit.yaml` field (`environment.backend`), translated into a `--backend` CLI flag
+    by the agent, the same way `--catalog`/`--max-rows-scanned`/etc. already work -- scripts still
+    never parse `toolkit.yaml` directly (references/toolkit-conventions.md #2).
+
+    Implemented: `scripts/lakehouse_adapter.py`'s `DatabricksAdapter` replaced by
+    `DatabricksConnectAdapter` (all 11 `LakehouseAdapter` methods reimplemented against
+    `spark.sql()` with named parameter markers instead of a DBAPI cursor's `?` placeholders --
+    same information_schema/`DESCRIBE DETAIL`/`TABLESAMPLE` queries carry over unchanged, since
+    Databricks Connect and a Databricks SQL warehouse compile the same SQL against the same
+    catalog). Added `build_adapter(backend, lakehouse_dir=None, catalog=..., spark=None)` as the one
+    place a build script picks a backend, so this doesn't need reimplementing per-skill by hand.
+    `toolkit.example.yaml`'s `auth:` block (service-principal/secret-scope config) removed; replaced
+    by `environment.backend` (`sqlite_fixture` | `databricks_connect`) and `environment.catalog`.
+    `skills/data-discovery/scripts/build_findings.py` gained the `--backend` flag and now calls
+    `build_adapter()`; `SKILL.md`, `references/toolkit-conventions.md`, `README.md`,
+    `fixtures/README.md`, and the `DatabricksAdapter` mentions in `data-validation`'s
+    `staged-comparison.md` and `data-pipeline`'s idempotency doc/script/eval updated to match.
+
+    **Scoped to data-discovery only.** `data-quality`, `data-validation`, `data-modeling`, and
+    `data-pipeline`'s build scripts still hardcode `SQLiteFixtureAdapter` directly -- the shared
+    adapter/factory groundwork here makes wiring each of them up a mechanical repeat of what
+    `build_findings.py` just got, but that's a follow-up, not done in this change (you only tested
+    data-discovery; doing all five unasked felt like scope creep on a live-fire bug report).
+
+    Not verified against a real workspace at the time this decision was written -- see #54, written
+    right after, which is exactly that verification and what it found.
+
+54. **`DatabricksConnectAdapter` verified against a real workspace (`samples.bakehouse.sales_customers`
+    on your `skill-dev-sandbox` profile, serverless compute) -- found and fixed two real bugs no
+    amount of reading the Databricks Connect docs would have caught.** Both are the kind of thing
+    #53's "not exercised by this toolkit's own evals" caveat exists to warn about.
+
+    First: `_query()` passed `catalog=`/`schema=`/`table=` to `spark.sql()` as `**kwargs`. PySpark's
+    `sql()` uses `**kwargs` for Python-string-style `{name}` substitution, not `:name` SQL-literal
+    parameter binding -- binding `:name` placeholders requires the `args=` dict specifically. Every
+    query using `:catalog`/`:schema`/`:table` silently failed with `UNBOUND_SQL_PARAMETER` the
+    instant it ran against a live session. Fixed: `_query()` now passes `args=params`.
+
+    Second, worse because it wouldn't have errored, it would have silently returned nothing: every
+    `information_schema` query (`list_tables`, `get_columns`, `get_table_comment`,
+    `get_constraints`) was unqualified (`FROM information_schema.tables`, filtering
+    `table_catalog = :catalog` in the WHERE clause). In Unity Catalog, `information_schema` is
+    per-catalog, not global -- an unqualified reference resolves against `current_catalog()`
+    (`adbkwus2skilldev` in this session), not whatever catalog you filter for. Filtering a
+    different catalog's `information_schema` for `table_catalog = 'samples'` doesn't error, it just
+    returns zero rows, so `list_tables`/`get_columns` came back empty against a table that
+    definitely existed (`row_count`/`estimate_bytes` worked fine throughout, since those already
+    fully qualified `{catalog}.{schema}.{table}` directly rather than going through
+    information_schema). This exact bug was latent in the original `DatabricksAdapter` from #51 too
+    (same unqualified-`information_schema` pattern) -- nobody caught it there either, for the same
+    reason: never run against a real workspace before now. Fixed: every information_schema
+    reference in `DatabricksConnectAdapter` now qualifies as `{self.catalog}.information_schema....`.
+
+    After both fixes, verified all 11 `LakehouseAdapter` methods individually against the real
+    table, then ran `build_findings.py --backend databricks_connect --catalog samples --target
+    bakehouse.sales_customers` itself end to end (not a hand-reproduced workaround) -- cost gate,
+    profiling, test proposals, and `email_address`/`phone_number` correctly hashed in
+    `sample_records` via `scripts/redact.py`. `skills/data-discovery/evals/run_assertions.py` re-run
+    against the SQLite fixture afterward to confirm neither fix touched `SQLiteFixtureAdapter`'s
+    behavior -- unchanged.
+
+    Incidental, unrelated to the adapter: your `~/.databrickscfg` had a duplicate
+    `[skill-dev-sandbox]` section (one complete, one a strict subset auto-appended by the Databricks
+    VS Code extension) that made the Databricks SDK's config parser fail outright
+    (`DuplicateSectionError`) before any of this could even be tested. You confirmed which block to
+    keep; the file was backed up to `~/.databrickscfg.bak` before editing. Unrelated second
+    incident: an early diagnostic command (`databricks auth token --profile skill-dev-sandbox`)
+    printed a live OAuth access token to the terminal -- a mistake, flagged to you at the time; the
+    token was short-lived (~1 hour) and scoped to your own workspace login, and no further command
+    in this session printed a credential value.
+
 *(Further decisions will be appended here as later phases proceed.)*

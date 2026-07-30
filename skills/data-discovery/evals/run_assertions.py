@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -67,7 +68,7 @@ if (REPO_ROOT / "contracts" / "examples" / "data-contract.example.json").exists(
 
 # Structurally invalid artifact (missing required fields) also rejected, not silently accepted.
 bad_artifact = {"schema_version": "1.0.0", "run": {}, "contract_id": "x"}
-bad_path = Path("/tmp/bad_contract.json")
+bad_path = Path(tempfile.gettempdir()) / "bad_contract.json"
 bad_path.write_text(json.dumps(bad_artifact))
 result = run([sys.executable, "scripts/validate_artifact.py", str(bad_path), "--schema-type", "data-contract"],
              expect_success=False)

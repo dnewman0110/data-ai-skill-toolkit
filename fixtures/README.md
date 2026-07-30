@@ -20,7 +20,7 @@ installing anything -- see `DECISIONS.md`: the original plan was DuckDB, but SQL
 was substituted without loss of the underlying design). Every skill's deterministic scripts are written
 against a thin adapter layer (`scripts/lakehouse_adapter.py`, shared across skills) so the same code
 path runs against the local SQLite fixture in eval/CI (`SQLiteFixtureAdapter`) and against a real
-Databricks SQL warehouse in production (`DatabricksAdapter`), both exposing the same
+Databricks workspace in production via Databricks Connect (`DatabricksConnectAdapter`), both exposing the same
 profile/sample/constraint/orphan-check interface. The three-level Unity Catalog `catalog.schema.table`
 hierarchy is simulated by `ATTACH`ing one SQLite file per schema (`bronze.db`, `silver.db`, `gold.db`)
 to a single connection; the "catalog" (`acme_retail_dev` in every example/eval) is just a config label.

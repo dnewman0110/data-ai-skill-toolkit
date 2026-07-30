@@ -2,7 +2,7 @@
 """
 validate_pipeline_locally.py -- the closest thing to "did we prove this pipeline is idempotent"
 this sandbox can do without a real Spark/Databricks target (this toolkit has no live workspace in
-CI -- see scripts/lakehouse_adapter.py's own docstring on the same limitation for DatabricksAdapter).
+CI -- see scripts/lakehouse_adapter.py's own docstring on the same limitation for DatabricksConnectAdapter).
 Rather than skip idempotency evidence entirely, this runs the SAME transform_spec that will be
 rendered into PySpark/Declarative Pipeline/Lakeflow Connect code (build_transform_spec.py) against
 mock data (derive_mock_data.py), in a scratch SQLite destination, TWICE, and diffs the result.

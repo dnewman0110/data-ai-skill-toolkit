@@ -60,7 +60,7 @@ or invest in the SQL-pushdown version for that specific platform pair.
 
 `compare()` takes independent `source_adapter`/`target_adapter` instances -- they don't have to be
 the same connection, or even the same platform. This toolkit ships two adapters
-(`scripts/lakehouse_adapter.py`): `SQLiteFixtureAdapter` (evals/local) and `DatabricksAdapter`
+(`scripts/lakehouse_adapter.py`): `SQLiteFixtureAdapter` (evals/local) and `DatabricksConnectAdapter`
 (production, Databricks-to-Databricks). Genuinely cross-platform validation (e.g. a SQL Server
 source against a Databricks target) is designed for -- the interface doesn't assume same-platform --
 but isn't implemented: it would need a new `LakehouseAdapter` subclass for the other platform, at

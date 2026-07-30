@@ -14,8 +14,9 @@ modeling  --model-spec-->  discovery  --data-contract-->  pipeline
 ```
 
 Default target environment: Databricks on Azure, Unity Catalog, latest LTS DBR, serverless-preferred
-compute, Databricks Jobs orchestration, native PySpark/SQL, service principal OAuth M2M auth with
-secrets from Databricks Secrets. All of this is configurable per project in `toolkit.yaml` -- see
+compute, Databricks Jobs orchestration, native PySpark/SQL, Databricks Connect for the real (non-fixture)
+backend -- reusing whatever session is already authenticated in the host environment rather than the
+toolkit managing its own auth. All of this is configurable per project in `toolkit.yaml` -- see
 `toolkit.example.yaml`.
 
 ## Repo layout

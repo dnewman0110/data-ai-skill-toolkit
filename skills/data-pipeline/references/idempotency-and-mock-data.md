@@ -1,7 +1,7 @@
 # Idempotency evidence and mock data: exactly what's proven, and what isn't
 
 This toolkit's evals run with no live Databricks/Spark workspace (see
-`scripts/lakehouse_adapter.py`'s own docstring on the same constraint for `DatabricksAdapter`).
+`scripts/lakehouse_adapter.py`'s own docstring on the same constraint for `DatabricksConnectAdapter`).
 Rather than skip idempotency evidence for `data-pipeline` entirely, `validate_pipeline_locally.py`
 proves what it CAN prove locally, and this file is explicit about the boundary so nobody mistakes
 "validated" for "deployed and confirmed working."

@@ -66,9 +66,12 @@ Full detail, including how to tell which mode you're in and what "narrow" means 
 
 2. **Run the cost gate, then profile.** Run
    `${CLAUDE_SKILL_DIR}/scripts/build_findings.py` with `--target schema.table` for every
-   target object, pointing `--lakehouse-dir`/connection config at what `toolkit.yaml` resolves
-   (the fixture lakehouse in evals; a real Databricks SQL warehouse in production via the
-   `DatabricksAdapter` in `scripts/lakehouse_adapter.py`), plus `--max-rows-scanned` /
+   target object, plus `--backend`/`--catalog`/`--lakehouse-dir` from what `toolkit.yaml`'s
+   `environment` block resolves: `--backend sqlite_fixture --lakehouse-dir <dir>` against the
+   fixture lakehouse in evals, or `--backend databricks_connect --catalog <name>` in production,
+   which uses `DatabricksConnectAdapter` in `scripts/lakehouse_adapter.py` -- an already-
+   authenticated Databricks Connect session in this environment, no separate credentials passed
+   in. Also pass `--max-rows-scanned` /
    `--max-bytes-scanned` from `toolkit.yaml`'s `cost_and_blast_radius` block and
    `--sensitive-columns-json` from its `sample_data.sensitive_columns`. This one command runs the
    pre-flight cost estimate, and **halts with exit code 1 and no profiling done** if the estimate

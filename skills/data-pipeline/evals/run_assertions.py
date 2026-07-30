@@ -55,8 +55,8 @@ vpl_text = (SKILL_DIR / "scripts" / "validate_pipeline_locally.py").read_text()
 check("validate_pipeline_locally.py's only sqlite3 connection is in-memory (':memory:')",
       "sqlite3.connect(\":memory:\")" in vpl_text and "sqlite3.connect(" in vpl_text
       and vpl_text.count("sqlite3.connect(") == vpl_text.count('sqlite3.connect(":memory:")'))
-check("validate_pipeline_locally.py never imports DatabricksAdapter (local-only by construction)",
-      "import DatabricksAdapter" not in vpl_text and "from lakehouse_adapter import" not in vpl_text)
+check("validate_pipeline_locally.py never imports DatabricksConnectAdapter (local-only by construction)",
+      "import DatabricksConnectAdapter" not in vpl_text and "from lakehouse_adapter import" not in vpl_text)
 
 # -- 2. Malformed / unsupported-major artifact rejected cleanly. --
 result = run([

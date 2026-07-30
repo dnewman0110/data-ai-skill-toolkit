@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
-from lakehouse_adapter import SQLiteFixtureAdapter  # noqa: E402
+from lakehouse_adapter import build_adapter  # noqa: E402
 from estimate_scan_cost import estimate_and_gate  # noqa: E402
 from redact import redact_rows  # noqa: E402
 
@@ -69,7 +69,11 @@ def build_findings(adapter, targets: list[tuple[str, str]], thresholds: dict,
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--lakehouse-dir", required=True)
+    parser.add_argument("--backend", choices=["sqlite_fixture", "databricks_connect"], default="sqlite_fixture",
+                         help="From toolkit.yaml's environment.backend. sqlite_fixture (evals/local "
+                              "dev, needs --lakehouse-dir) or databricks_connect (production, via an "
+                              "already-authenticated Databricks Connect session).")
+    parser.add_argument("--lakehouse-dir", default=None, help="Required when --backend sqlite_fixture.")
     parser.add_argument("--catalog", default="acme_retail_dev")
     parser.add_argument("--target", action="append", required=True, help="schema.table, repeatable")
     parser.add_argument("--candidate-fk", action="append", default=[],
@@ -83,6 +87,9 @@ def main():
     parser.add_argument("--force", action="store_true", help="Proceed even if the cost gate says no. Use only after explicit human confirmation.")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
+
+    if args.backend == "sqlite_fixture" and not args.lakehouse_dir:
+        parser.error("--lakehouse-dir is required when --backend sqlite_fixture")
 
     targets = [tuple(t.split(".", 1)) for t in args.target]
 
@@ -98,7 +105,7 @@ def main():
     if args.sensitive_columns_json:
         sensitive_columns = json.loads(args.sensitive_columns_json.read_text())
 
-    adapter = SQLiteFixtureAdapter(args.lakehouse_dir, catalog=args.catalog)
+    adapter = build_adapter(args.backend, lakehouse_dir=args.lakehouse_dir, catalog=args.catalog)
     result = build_findings(
         adapter, targets,
         thresholds={"max_rows_scanned": args.max_rows_scanned, "max_bytes_scanned": args.max_bytes_scanned},
