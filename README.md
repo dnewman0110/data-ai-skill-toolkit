@@ -1,17 +1,33 @@
 # data-ai-skill-toolkit
 
 A reusable toolkit of five Claude skills for Databricks/Unity Catalog data engagements, built as one
-system rather than five independent tools. Three skills form a chain -- `data-modeling` ->
-`data-discovery` -> `data-pipeline` -- and two validators, `data-quality` and `data-validation`, attach
-at fixed points in that chain. All five read and write a shared set of versioned JSON Schemas under
-`contracts/`, so the handoff between skills is a checkable artifact, not a hope.
+system rather than five independent tools. `data-discovery` is the hub: it either resolves an
+*already-designed* dimensional model from `data-modeling` against real objects (**resolution**
+mode -- for a new or extended star schema), or explores directly from prose business intent with
+no prior design at all (**greenfield** mode -- the common case, and where most engagements start).
+Either mode produces a `data-contract.json`, which `data-pipeline` builds code from. Two
+validators, `data-quality` and `data-validation`, attach at fixed points against that chain's
+outputs. All five read and write a shared set of versioned JSON Schemas under `contracts/`, so the
+handoff between skills is a checkable artifact, not a hope.
 
 ```
+                              (greenfield: prose business intent,
+                               no model-spec -- the common case)
+                                              |
+                                              v
 modeling  --model-spec-->  discovery  --data-contract-->  pipeline
-                                |                              |
-                          (quality attaches                (validation attaches
+(optional: formal              |                              |
+ star-schema design)     (quality attaches                (validation attaches
                            to any source/target)             source vs. target)
 ```
+
+A third path is also viable but only informally: run `data-discovery` greenfield first to learn
+what data actually exists, then hand what it found to `data-modeling` as business context/candidate
+source objects, then resolve the resulting `model-spec.json` back through `data-discovery` as usual.
+This works today, but unlike every other handoff above, it isn't a checkable artifact --
+`model-spec.json` has no field referencing a prior `data-contract.json`, so nothing records that the
+design was grounded in that earlier run. Backlogged for a future pass (a `source_data_contract_ref`-
+style field, mirroring `data-contract.json`'s `source_model_spec_ref`).
 
 Default target environment: Databricks on Azure, Unity Catalog, latest LTS DBR, serverless-preferred
 compute, Databricks Jobs orchestration, native PySpark/SQL, Databricks Connect for the real (non-fixture)
