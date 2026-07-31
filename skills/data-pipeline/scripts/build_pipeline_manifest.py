@@ -29,13 +29,16 @@ from generate_pipeline_code import generate_pipeline_code  # noqa: E402
 
 
 def build_pipeline_findings(contract: dict, table_name: str, modality: str,
-                             output_dir: Path, mock_row_count: int = 50, mock_seed: int = 1337) -> dict:
+                             output_dir: Path, mock_row_count: int = 50, mock_seed: int = 1337,
+                             sensitive_columns: list[dict] = None,
+                             pii_target_transform: dict = None) -> dict:
     table = next((t for t in contract["tables"] if t["name"] == table_name), None)
     if table is None:
         return {"halted": True, "reason": f"No table '{table_name}' in this data-contract.", "targets": None}
 
     try:
-        spec = build_transform_spec(contract, table_name)
+        spec = build_transform_spec(contract, table_name, sensitive_columns=sensitive_columns,
+                                     pii_target_transform=pii_target_transform)
     except ValueError as e:
         return {"halted": True, "reason": str(e), "targets": None}
 
@@ -90,6 +93,11 @@ def build_pipeline_findings(contract: dict, table_name: str, modality: str,
             "evidence_ref": str(evidence_path),
         },
         "low_confidence_mappings": spec["low_confidence_mappings"],
+        # Config gaps (no target-transform rule defined) plus modality-capability gaps (Lakeflow
+        # Connect can't transform columns at all) -- see build_transform_spec.py and
+        # generate_pipeline_code.py's _pii_transform_notes. Never silently dropped: SKILL.md step 4
+        # folds this into the final manifest's assumptions[], same treatment as low_confidence_mappings.
+        "pii_transform_gaps": spec["target_transform_gaps"] + codegen["pii_transform_notes"],
     }
 
 
@@ -102,13 +110,22 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--mock-row-count", type=int, default=50)
     parser.add_argument("--mock-seed", type=int, default=1337)
+    parser.add_argument("--sensitive-columns-json", type=Path, default=None,
+                         help="JSON file: toolkit.yaml's sample_data.sensitive_columns list")
+    parser.add_argument("--pii-target-transform-json", type=Path, default=None,
+                         help="JSON file: toolkit.yaml's pii_handling.target_transform object")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
     contract = json.loads(args.contract_json.read_text())
+    sensitive_columns = (json.loads(args.sensitive_columns_json.read_text())
+                         if args.sensitive_columns_json else [])
+    pii_target_transform = (json.loads(args.pii_target_transform_json.read_text())
+                            if args.pii_target_transform_json else {})
     result = build_pipeline_findings(
         contract, args.table, args.modality, args.output_dir,
         mock_row_count=args.mock_row_count, mock_seed=args.mock_seed,
+        sensitive_columns=sensitive_columns, pii_target_transform=pii_target_transform,
     )
 
     output = json.dumps(result, indent=2, default=str)

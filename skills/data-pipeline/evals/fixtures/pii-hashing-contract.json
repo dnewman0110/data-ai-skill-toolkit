@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3EVAL0PIIHASHING0001",
+    "skill": { "name": "data-discovery", "version": "1.0.0" },
+    "timestamp": "2026-07-31T12:00:00Z",
+    "target": { "platform": "azure", "catalog_type": "unity_catalog", "workspace_id": "adb-example-123456789.12.azuredatabricks.net", "catalog": "acme_retail_dev", "schema": "silver" },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "not_applicable",
+    "source_fingerprints": [],
+    "telemetry": { "estimated_bytes_scanned": 0, "estimated_rows_scanned": 0, "thresholds_applied": { "max_rows_scanned": null, "max_bytes_scanned": null, "max_wall_clock_seconds": null } },
+    "previous_run_id": null
+  },
+  "contract_id": "acme-dim-customer-pii-hashing-v1",
+  "invocation_mode": "greenfield",
+  "source_model_spec_ref": null,
+  "grain_determination": { "method": "explicit_constraint", "confidence_basis": "customer_id is the source system's own primary key" },
+  "tables": [
+    {
+      "name": "dim_customer",
+      "target_catalog": "acme_retail_dev",
+      "target_schema": "gold",
+      "grain": { "statement": "One row per customer.", "determination": "explicit_constraint", "basis": "silver.customers.customer_id is the source system's own primary key." },
+      "columns": [
+        { "name": "customer_id", "type": "bigint", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.customers", "column": "customer_id", "mapping_type": "explicit_alias" } },
+        { "name": "customer_name", "type": "string", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.customers", "column": "full_name", "mapping_type": "explicit_alias" } },
+        { "name": "email_address", "type": "string", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.customers", "column": "email_address", "mapping_type": "explicit_alias" } },
+        { "name": "phone_number", "type": "string", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.customers", "column": "phone_number", "mapping_type": "explicit_alias" } }
+      ],
+      "tests": [
+        { "type": "nullability", "column": "customer_id", "params": { "max_null_rate": 0 }, "threshold_basis": "explicit_constraint", "severity": "blocking" },
+        { "type": "uniqueness", "column": "customer_id", "params": { "columns": ["customer_id"] }, "threshold_basis": "explicit_constraint", "severity": "blocking" }
+      ],
+      "sample_records": [],
+      "row_count_estimate": 0
+    }
+  ],
+  "unresolved_requirements": [],
+  "assumptions": []
+}

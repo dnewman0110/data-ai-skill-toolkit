@@ -92,8 +92,19 @@ diffable record the other four get. See `DECISIONS.md`.
    ```
    python "${CLAUDE_SKILL_DIR}/scripts/build_pipeline_manifest.py" \
      --contract-json <contract> --table <table_name> --modality <chosen> \
-     --output-dir <output_dir> --out <output_dir>/pipeline_findings_<table>.json
+     --output-dir <output_dir> --out <output_dir>/pipeline_findings_<table>.json \
+     --sensitive-columns-json <sample_data.sensitive_columns as JSON> \
+     --pii-target-transform-json <pii_handling.target_transform as JSON>
    ```
+   The last two flags come straight from `toolkit.yaml` (read them the same way step 2 already
+   reads `environment.declarative_pipelines_available`), written to small scratch JSON files first.
+   `--sensitive-columns-json` is what marks a column as PII at all (same list `data-discovery`
+   already uses for sample redaction); `--pii-target-transform-json` is the separate, opt-in policy
+   for what happens to those columns in the REAL generated target -- `sample_data` alone never
+   changes generated code. Omitting either flag is safe (defaults to no columns treated as
+   sensitive / transform disabled) but means every PII column will show up in
+   `pii_transform_gaps` below, so pass them whenever `toolkit.yaml` defines them.
+
    This derives the portable transform spec, synthesizes mock data, proves local idempotency
    (or determines it's `not_applicable` for `lakeflow_connect`), and renders the modality's code
    files. It never chooses the modality itself -- you pass it in from step 2.
@@ -108,6 +119,13 @@ diffable record the other four get. See `DECISIONS.md`.
    Also check `low_confidence_mappings` -- any target column whose contract mapping was
    `llm_inferred` with confidence below 0.5 gets an entry in the final manifest's `assumptions[]`
    noting the generated code trusts that mapping as-is (see the example artifact).
+
+   Also check `pii_transform_gaps` -- any PII-tagged column (per `sample_data.sensitive_columns`)
+   that was NOT hashed in the real generated target, whether because `pii_handling.target_transform`
+   is disabled/undefined for it or because the chosen modality can't apply column transforms at all
+   (`lakeflow_connect`). Every entry here gets its own `assumptions[]` entry too -- never fold these
+   into a single summary line, and never treat an empty `pii_transform_gaps` as proof no PII exists
+   on the target; it only means every PII column that *was* detected got a rule applied.
 
 5. **Assemble `pipeline-manifest.json`** matching `contracts/pipeline-manifest.schema.json`:
    `targets[]` from each `pipeline_findings_<table>.json`'s `target`, `mock_data` and
@@ -129,8 +147,9 @@ diffable record the other four get. See `DECISIONS.md`.
    files; new runs get a new `run_id` directory.
 
 7. **Report to the human, and stop.** Summarize: which modality was chosen and why, what files
-   were generated and where, the idempotency evidence, and any `low_confidence_mappings` or
-   halted targets. **Explicitly ask** whether and where to move toward deployment -- do not offer
+   were generated and where, the idempotency evidence, and any `low_confidence_mappings`,
+   `pii_transform_gaps`, or halted targets. **Explicitly ask** whether and where to move toward
+   deployment -- do not offer
    to deploy proactively. Only if the human's response, in this conversation, names a specific
    target job/object and says to proceed: update `deployment` (`approved: true`, `approved_by`,
    `target_named` echoing exactly what they named, `approval_note`, `approved_at`) and set

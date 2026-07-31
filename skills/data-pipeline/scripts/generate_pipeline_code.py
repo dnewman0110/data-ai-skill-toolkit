@@ -23,8 +23,33 @@ TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
 def _select_lines(spec: dict) -> str:
-    lines = [f'    F.col("{c["source_column"]}").alias("{c["target"]}")' for c in spec["columns"]]
+    lines = []
+    for c in spec["columns"]:
+        if c.get("target_transform") == "hash":
+            lines.append(
+                f'    F.sha2(F.col("{c["source_column"]}").cast("string"), 256).alias("{c["target"]}")'
+            )
+        else:
+            lines.append(f'    F.col("{c["source_column"]}").alias("{c["target"]}")')
     return ",\n".join(lines)
+
+
+def _pii_transform_notes(spec: dict, modality: str) -> list[dict]:
+    """Lakeflow Connect renders a raw connector-config stub (see
+    templates/lakeflow_connect_config.yaml.tmpl) with no column-transform capability at all -- a
+    modality-capability gap distinct from transform_spec's target_transform_gaps (a config gap:
+    no rule was defined). A column tagged target_transform "hash" still can't actually be hashed
+    for this modality, so that has to be surfaced too, separately."""
+    if modality != "lakeflow_connect":
+        return []
+    return [
+        {
+            "column": c["target"],
+            "reason": "not applied -- Lakeflow Connect performs raw ingestion with no "
+                      "column-transform capability; the real target will contain untransformed PII.",
+        }
+        for c in spec["columns"] if c.get("target_transform") == "hash"
+    ]
 
 
 def _expectation_lines(spec: dict) -> tuple[str, list[dict]]:
@@ -83,6 +108,7 @@ def generate_pipeline_code(spec: dict, modality: str, output_dir: Path) -> dict:
     merge_keys_csv = ", ".join(spec["merge_keys"]) if spec["merge_keys"] else "(none -- full_refresh)"
     select_lines = _select_lines(spec)
     expectation_lines, tests_carried_forward = _expectation_lines(spec)
+    pii_transform_notes = _pii_transform_notes(spec, modality)
     sequence_by_column = spec["merge_keys"][0] if spec["merge_keys"] else spec["columns"][0]["target"]
 
     substitutions = {
@@ -142,6 +168,7 @@ def generate_pipeline_code(spec: dict, modality: str, output_dir: Path) -> dict:
         "generated_files": generated_files,
         "transform_spec_ref": str(spec_path.relative_to(output_dir)),
         "tests_carried_forward": tests_carried_forward,
+        "pii_transform_notes": pii_transform_notes,
     }
 
 

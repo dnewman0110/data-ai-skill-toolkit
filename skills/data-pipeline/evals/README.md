@@ -30,17 +30,19 @@ end-to-end smoke test that also exercises `validate_artifact.py`. This is what
 
 ## 2. Scenario evals (`evals.json` / `eval_metadata.json`) -- require a subagent with the skill loaded
 
-Five scenarios (one more than this toolkit's other skills, because the deploy-approval gate is a
-high-consequence behavior worth its own dedicated check rather than folding it into the happy
-path): the modality rubric choosing correctly on a normal reshaping target (eval 1, using the same
-`fct_orders` contract every other skill's evals reference), choosing `lakeflow_connect` for a
-genuinely managed-connector bronze landing (eval 2, using a purpose-built fixture contract under
-`evals/fixtures/` since the toolkit's own fixture lakehouse has no external-system source), routing
-a multi-source join to `pyspark_notebook` rather than forcing a broken single-source spec (eval 3,
-same fixture pattern), declining to re-enter code-generation mode for what's actually a
-post-load correctness question (eval 4), and -- the one most worth getting right in this skill --
-refusing to advance past `validated` on a vague "go ahead and deploy it" that doesn't name a
-specific target (eval 5).
+Seven scenarios: the modality rubric choosing correctly on a normal reshaping target (eval 1,
+using the same `fct_orders` contract every other skill's evals reference), choosing
+`lakeflow_connect` for a genuinely managed-connector bronze landing (eval 2, using a purpose-built
+fixture contract under `evals/fixtures/` since the toolkit's own fixture lakehouse has no
+external-system source), routing a multi-source join to `pyspark_notebook` rather than forcing a
+broken single-source spec (eval 3, same fixture pattern), declining to re-enter code-generation
+mode for what's actually a post-load correctness question (eval 4), refusing to advance past
+`validated` on a vague "go ahead and deploy it" that doesn't name a specific target (eval 5), and
+-- added when `pii_handling.target_transform` was introduced (DECISIONS.md decision 55) -- real
+target-data hashing actually applying when `toolkit.yaml` enables it (eval 6, using
+`evals/fixtures/pii-hashing-contract.json`) and the gap being surfaced loudly in
+`pii_transform_gaps` rather than silently guessed or silently dropped when it's disabled (eval 7,
+same fixture).
 
 **Phase 2 sign-off evidence**: eval 1 (the fullest scenario -- modality classification, code
 generation, idempotency evidence, and the deployment-gate language all in one run) was run as a
@@ -54,6 +56,10 @@ against the same fixture contracts; evals 4 and 5 rely on the skill description,
 consistent with how the prior three skills' Phase 1/2 sign-offs handled their own equivalent
 cases. Re-run 2, 3, 4, and 5 as full subagent scenarios before this touches a real engagement --
 eval 5 in particular is worth re-running any time `SKILL.md`'s deployment-gate language changes.
+Evals 6 and 7's *mechanism* (hash rendering, and `target_transform_gaps` population) was verified
+directly against `build_transform_spec`/`generate_pipeline_code`/`build_pipeline_manifest` rather
+than via a subagent run when this was added -- run 6 and 7 as full subagent scenarios at least once
+before this touches a real engagement, same as 2-5.
 
 To re-run a scenario eval yourself: spawn an agent with access to this repo, point it at
 `skills/data-pipeline/SKILL.md`, and give it the `prompt` field from the matching entry in

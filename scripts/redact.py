@@ -21,17 +21,21 @@ import re
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 
-def _normalize_column_name(column_name: str) -> str:
+def normalize_column_name(column_name: str) -> str:
     """Patterns in toolkit.yaml are written snake_case (`card_number`). Source systems don't all
     name columns that way -- normalize camelCase/PascalCase/kebab-case to snake_case before
     matching so e.g. `cardNumber` or `Card-Number` still hits the `card_number` pattern instead of
     silently passing through unredacted.
+
+    Public (no leading underscore): data-pipeline's build_transform_spec.py imports this to match
+    the same sensitive-column patterns against real target columns, so "is this column PII" is
+    computed identically whether the result drives sample redaction or real-data transform.
     """
     return _CAMEL_BOUNDARY.sub("_", column_name).replace("-", "_").lower()
 
 
 def _column_action(column_name: str, sensitive_columns: list[dict]) -> str | None:
-    normalized = _normalize_column_name(column_name)
+    normalized = normalize_column_name(column_name)
     for rule in sensitive_columns:
         if re.search(rule["pattern"], normalized):
             return rule["action"]

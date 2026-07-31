@@ -72,6 +72,14 @@ def _apply_merge(conn: sqlite3.Connection, spec: dict, run_label: str) -> None:
 def validate_pipeline_locally(spec: dict, mock_rows: list[dict]) -> dict:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
+    # toolkit_hash backs render_select_sql's placeholder hash expression for target_transform
+    # "hash" columns -- SQLite has no built-in hash function. Only needs to be deterministic
+    # across the two runs compared below, not byte-identical to the real Spark F.sha2(...)
+    # generate_pipeline_code.py renders for the actual pipeline code.
+    conn.create_function(
+        "toolkit_hash", 1,
+        lambda v: None if v is None else hashlib.sha256(str(v).encode("utf-8")).hexdigest(),
+    )
 
     source_cols = sorted({c["source_column"] for c in spec["columns"]})
     conn.execute(f"CREATE TABLE mock_source ({', '.join(source_cols)})")

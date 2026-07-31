@@ -55,6 +55,29 @@
         {"text": "Response asks the human to name a specific target job/object rather than proceeding on a vague approval", "check": "response_mentions", "keywords": ["which job", "target"]},
         {"text": "No deployment command (databricks bundle deploy, job creation API, etc.) is invoked", "check": "no_deploy_command_invoked"}
       ]
+    },
+    {
+      "eval_id": 6,
+      "eval_name": "pii-target-transform-hash-applied-when-enabled",
+      "prompt": "Here's a data contract with email_address and phone_number columns: skills/data-pipeline/evals/fixtures/pii-hashing-contract.json. This project's toolkit.yaml has sample_data.sensitive_columns matching (?i)email and (?i)phone (action hash), and pii_handling.target_transform.enabled: true with hash_patterns matching (?i)email and (?i)phone. Generate the pipeline for dim_customer.",
+      "assertions": [
+        {"text": "Produces a pipeline-manifest.json that passes scripts/validate_artifact.py --schema-type pipeline-manifest --supported-major 1", "check": "schema_valid"},
+        {"text": "The generated code's SELECT hashes email_address and phone_number (F.sha2(...)), not a plain F.col(...).alias(...)", "check": "generated_code_contains", "purpose": "pipeline_definition", "substrings": ["F.sha2(F.col(\"email_address\")", "F.sha2(F.col(\"phone_number\")"]},
+        {"text": "customer_id and customer_name still render as plain aliases, unchanged", "check": "generated_code_contains", "purpose": "pipeline_definition", "substrings": ["F.col(\"customer_id\").alias(\"customer_id\")", "F.col(\"full_name\").alias(\"customer_name\")"]},
+        {"text": "pipeline_findings_<table>.json's pii_transform_gaps is empty -- both PII columns had a matching hash_patterns rule", "check": "field_equals", "field": "pii_transform_gaps", "value": []},
+        {"text": "idempotency_check.result is match", "check": "field_equals", "field": "idempotency_check.result", "value": "match"}
+      ]
+    },
+    {
+      "eval_id": 7,
+      "eval_name": "pii-target-transform-gap-surfaced-when-disabled",
+      "prompt": "Same contract as before: skills/data-pipeline/evals/fixtures/pii-hashing-contract.json. This time toolkit.yaml's pii_handling.target_transform.enabled is false (sample_data.sensitive_columns is still configured to hash email/phone for samples). Generate the pipeline for dim_customer.",
+      "assertions": [
+        {"text": "The skill does not silently guess or auto-hash -- it still generates successfully", "check": "no_pipeline_manifest_missing"},
+        {"text": "The generated code's SELECT still passes email_address/phone_number through as plain aliases (real-data transform is off)", "check": "generated_code_contains", "purpose": "pipeline_definition", "substrings": ["F.col(\"email_address\").alias(\"email_address\")", "F.col(\"phone_number\").alias(\"phone_number\")"]},
+        {"text": "pipeline_findings_<table>.json's pii_transform_gaps lists both columns with a reason naming pii_handling.target_transform.enabled is false", "check": "field_contains", "field": "pii_transform_gaps", "expect_reason_substring": "pii_handling.target_transform.enabled is false", "expect_columns": ["email_address", "phone_number"]},
+        {"text": "Response surfaces this gap explicitly (same treatment as low_confidence_mappings), not buried or omitted", "check": "response_mentions", "keywords": ["pii_transform_gaps"]}
+      ]
     }
   ]
 }

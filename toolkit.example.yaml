@@ -60,6 +60,26 @@ sample_data:
     - pattern: "(?i)(credit_card|card_number|cvv)"
       action: redact
 
+pii_handling:
+  target_transform:                  # separate from sample_data above on purpose: sample_data
+                                      # controls what's HIDDEN in a displayed sample or LLM prompt;
+                                      # this controls what's actually WRITTEN into the real
+                                      # generated pipeline's target table -- a bigger, harder-to-
+                                      # reverse decision, so it's opt-in and defaults off.
+    enabled: false                    # false: pii-tagged real columns pass through unchanged, but
+                                      # every one is still listed in pipeline-manifest.json's
+                                      # assumptions[] -- data-pipeline never silently drops this.
+    hash_patterns:                    # column-name regex (same snake_case normalization as
+                                      # sample_data.sensitive_columns above) hashed in the REAL
+                                      # generated target when enabled is true. v1 only supports
+                                      # hash here -- writing a constant "[REDACTED]" into a real
+                                      # production table is a bigger call than this file should
+                                      # make by default; columns covered only by a sample "redact"
+                                      # rule (SSN, card number) still show up in assumptions[]
+                                      # until a human decides what to do with them.
+      - "(?i)email"
+      - "(?i)phone"
+
 quality:
   default_thresholds:
     null_rate_warning: 0.01

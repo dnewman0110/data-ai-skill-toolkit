@@ -857,4 +857,49 @@ just accepted on the subagent's word.
     token was short-lived (~1 hour) and scoped to your own workspace login, and no further command
     in this session printed a credential value.
 
+55. **`toolkit.yaml`'s email/phone hashing rule was never actually applied to real generated
+    pipeline output -- only to samples. Fixed, deliberately without touching `pii_tag` or
+    `data-discovery`.** #54 confirmed `email_address`/`phone_number` correctly hashed in
+    `sample_records` via `scripts/redact.py`; what wasn't checked is that this is *all*
+    `sample_data.sensitive_columns` ever did. `build_transform_spec.py` and
+    `generate_pipeline_code.py` had zero references to it (confirmed by grep) -- every column, PII
+    or not, rendered as a plain `F.col(x).alias(y)`, so a real target table got real emails/phones
+    while its own contract's sample rows showed hashed values, a false sense PII was handled.
+
+    Root cause was one layer deeper than "codegen ignores `pii_tag`": `pii_tag` on a contract
+    column (schema-documented as driving redaction) is a dead letter in practice. Nothing in
+    `data-discovery` ever sets it -- `redact.py`'s `_column_action` re-derives sensitivity by
+    regex-matching column names against `toolkit.yaml` directly, never reading `pii_tag`. So the
+    fix does not route through `pii_tag` or touch `data-discovery` at all; `build_transform_spec.py`
+    now detects PII the same way `redact.py` already does (reusing its normalization, now exported
+    as `normalize_column_name`), matching column names against `sample_data.sensitive_columns`.
+
+    Deliberately added a SEPARATE, opt-in config surface -- `pii_handling.target_transform`
+    (`enabled`, `hash_patterns`) -- rather than reusing `sample_data.sensitive_columns`'s
+    hash/redact actions directly for real data. "What to hide in a displayed sample" and "what to
+    irreversibly transform in a production Delta table" are different-stakes decisions; toggling
+    both with one flag risked silently changing real generated-pipeline output for every existing
+    engagement the moment this shipped. Defaults to `enabled: false` -- a PII column with no
+    explicit real-data rule still generates successfully but is always listed in the new
+    `pii_transform_gaps` (`transform_spec.json` / `pipeline_findings_<table>.json`), which `SKILL.md`
+    step 4 now folds into the final manifest's `assumptions[]`, same treatment as
+    `low_confidence_mappings`. Never silently guessed, never silently dropped.
+
+    v1 only supports a `hash` action for real target data, not `redact` -- writing a constant into
+    a real production table is a bigger, more opinionated call (effectively "never truthfully
+    ingest this column") than a codegen default should make. Columns whose only sample rule is
+    `redact` (SSN, card number) still surface in `pii_transform_gaps` until a human decides what to
+    do with them; that's intentional scope, not a remaining bug. `lakeflow_connect` (raw ingestion,
+    no column-transform capability at all) always reports its hash-tagged columns as an
+    unactionable modality-capability gap, distinct from a config gap.
+
+    `render_select_sql` (feeds the local SQLite idempotency proof) and `_select_lines` (feeds the
+    actual PySpark/Declarative Pipeline templates) were updated in lockstep from the same spec
+    field (`column.target_transform`), preserving this script's own stated invariant that "the
+    generated code and the tested logic can never silently diverge." SQLite has no built-in hash
+    function, so `validate_pipeline_locally.py` registers a `toolkit_hash` scalar function
+    (`sha256`) as a placeholder -- it only needs to be deterministic across the two compared runs,
+    not byte-identical to the real Spark `F.sha2(...)` the actual generated code uses, the same
+    "close enough" standard the rest of that script's SQL dialect already claims.
+
 *(Further decisions will be appended here as later phases proceed.)*
