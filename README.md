@@ -84,39 +84,14 @@ best-effort parsing them. This means a toolkit minor/patch release can freely im
 as long as the schema major version it reads and writes doesn't change; a schema *major* bump is
 correctly treated as a breaking toolkit release and called out loudly in `CHANGELOG.md`.
 
-## Pinning
-
-**Recommended: git submodule, pinned to an annotated tag**, checked into the client project repo (e.g.
-at `.toolkit/data-ai-skill-toolkit`).
-
-```
-git submodule add --branch main https://github.com/<org>/data-ai-skill-toolkit .toolkit/data-ai-skill-toolkit
-cd .toolkit/data-ai-skill-toolkit && git checkout v1.2.0 && cd -
-git add .gitmodules .toolkit/data-ai-skill-toolkit
-git commit -m "Pin data-ai-skill-toolkit to v1.2.0"
-```
-
-Why a submodule over vendoring a copy: the pin is a single reviewable commit (the submodule's recorded
-SHA), `git submodule update --remote` to move to a new tag is explicit and auditable, and the toolkit's
-own history stays out of the client repo's blame/log noise. The tradeoff is real -- submodules confuse
-people unfamiliar with them, and a small number of client environments restrict external git remotes in
-CI. For those cases, fall back to **vendoring**: download the release tarball for a specific tag and
-commit it directly under `.toolkit/`, alongside a `TOOLKIT_VERSION` file recording the exact tag. Either
-way, the rule is the same: a project records, in a single file a reviewer can see, exactly which toolkit
-version it's on.
-
-**This section is about where the toolkit's files live in a project repo. It does not by itself make
-Claude Code load the skills** -- see "Installing as a plugin" below for that; the two are independent
-concerns and the same pinning discipline (submodule SHA / `TOOLKIT_VERSION`) applies regardless of
-which install path you use.
-
 ## Installing as a plugin
 
 This repo is a [Claude Code plugin](https://code.claude.com/docs/en/plugins-reference)
 (`.claude-plugin/plugin.json` at the repo root) with its own `.claude-plugin/marketplace.json`, so it's
 also the marketplace that distributes it -- installing it as a plugin is what actually makes Claude Code
-discover and invoke the five skills from inside a project session; pinning a copy into the repo (above)
-without this step just leaves the files sitting there unused.
+discover and invoke the five skills from inside a project session, and is enough on its own to start
+using the toolkit; pinning a copy of the raw files into the repo (below) is a separate, optional concern,
+not a prerequisite.
 
 Every `SKILL.md` resolves its shared paths (`scripts/`, `contracts/`) via `${CLAUDE_PLUGIN_ROOT}` and its
 own bundled scripts via `${CLAUDE_SKILL_DIR}`, both of which Claude Code substitutes inline regardless of
@@ -157,7 +132,7 @@ tag via `ref`:
 
 Anyone who clones the project and accepts its workspace trust dialog gets the pinned version; bumping the
 pin is a one-line `ref` change reviewable in a diff, the same discipline as the submodule SHA in
-"Pinning" above. Since this now covers reproducibility for the plugin itself, "Pinning" above is only
+"Pinning" below. Since this already covers reproducibility for the plugin itself, "Pinning" below is only
 needed if a project *also* wants the toolkit's raw files physically present in its repo (e.g. for
 scripts run outside Claude Code, or an audit trail) -- it's independent of, not required for, getting the
 skills loaded.
@@ -174,6 +149,34 @@ folder directly into the target project's `.claude/skills/<name>/`, without `.cl
 This drops the `${CLAUDE_PLUGIN_ROOT}`/`${CLAUDE_SKILL_DIR}` substitution, so you'll also need to bring
 along the shared `contracts/` and root `scripts/` directories and adjust each `SKILL.md`'s path
 references accordingly.
+
+## Pinning the toolkit's raw files (optional)
+
+Most projects don't need this section -- "Installing as a plugin" above is what actually loads the
+skills into Claude Code, and its `.claude/settings.json` block already gives a team a pinned,
+reproducible install on its own. Come here only if you *also* want the toolkit's raw files physically
+present in the project repo -- e.g. for scripts run outside Claude Code, or an audit-trail requirement
+-- which is a separate, independent concern from getting the skills loaded.
+
+**Recommended: git submodule, pinned to an annotated tag**, checked into the client project repo (e.g.
+at `.toolkit/data-ai-skill-toolkit`).
+
+```
+git submodule add --branch main https://github.com/<org>/data-ai-skill-toolkit .toolkit/data-ai-skill-toolkit
+cd .toolkit/data-ai-skill-toolkit && git checkout v1.2.0 && cd -
+git add .gitmodules .toolkit/data-ai-skill-toolkit
+git commit -m "Pin data-ai-skill-toolkit to v1.2.0"
+```
+
+Why a submodule over vendoring a copy: the pin is a single reviewable commit (the submodule's recorded
+SHA), `git submodule update --remote` to move to a new tag is explicit and auditable, and the toolkit's
+own history stays out of the client repo's blame/log noise. The tradeoff is real -- submodules confuse
+people unfamiliar with them, and a small number of client environments restrict external git remotes in
+CI. For those cases, fall back to **vendoring**: download the release tarball for a specific tag and
+commit it directly under `.toolkit/`, alongside a `TOOLKIT_VERSION` file recording the exact tag. Either
+way, the rule is the same: a project records, in a single file a reviewer can see, exactly which toolkit
+version it's on. The same pinning discipline (submodule SHA / `TOOLKIT_VERSION`) applies regardless of
+which install path you use.
 
 ## Mid-engagement updates
 
