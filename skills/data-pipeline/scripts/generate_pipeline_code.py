@@ -25,12 +25,19 @@ TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 def _select_lines(spec: dict) -> str:
     lines = []
     for c in spec["columns"]:
-        if c.get("target_transform") == "hash":
-            lines.append(
-                f'    F.sha2(F.col("{c["source_column"]}").cast("string"), 256).alias("{c["target"]}")'
-            )
+        # A non-null "transformation" (contract's source.transformation, e.g.
+        # "DATEDIFF(check_out, check_in)") is rendered via F.expr rather than a bare F.col alias --
+        # json.dumps guarantees a correctly-escaped Python string literal, so the transformation
+        # string (LLM/human-authored, untrusted-ish) can never break out of the F.expr(...) call no
+        # matter what it contains. The SQL text itself still runs through Spark's own parser, same
+        # trust boundary this toolkit already accepts for everything a human reviews before deploy.
+        if c.get("transformation"):
+            base = f'F.expr({json.dumps(c["transformation"])})'
         else:
-            lines.append(f'    F.col("{c["source_column"]}").alias("{c["target"]}")')
+            base = f'F.col("{c["source_column"]}")'
+        if c.get("target_transform") == "hash":
+            base = f'F.sha2({base}.cast("string"), 256)'
+        lines.append(f'    {base}.alias("{c["target"]}")')
     return ",\n".join(lines)
 
 
@@ -49,6 +56,26 @@ def _pii_transform_notes(spec: dict, modality: str) -> list[dict]:
                       "column-transform capability; the real target will contain untransformed PII.",
         }
         for c in spec["columns"] if c.get("target_transform") == "hash"
+    ]
+
+
+def _scd2_unsupported_notes(spec: dict, modality: str) -> list[dict]:
+    """SCD Type 2 (stored_as_scd_type=2 + track_history_column_list) is a dlt.apply_changes
+    feature -- declarative_pipeline modality only. pyspark_notebook's hand-rolled Delta MERGE has
+    no built-in expire-and-insert-new-version semantics (that's genuinely complex_procedural logic,
+    not something safe to template), and lakeflow_connect is raw ingestion with no transform
+    capability at all (same reasoning as _pii_transform_notes). Surfaced as a gap, never silently
+    ignored or guessed at."""
+    if modality == "declarative_pipeline" or not spec.get("track_history_columns"):
+        return []
+    return [
+        {
+            "column": col,
+            "reason": f"not applied -- SCD Type 2 history tracking is only auto-rendered for the "
+                      f"declarative_pipeline modality (dlt.apply_changes); {modality} would need "
+                      f"this hand-authored.",
+        }
+        for col in spec["track_history_columns"]
     ]
 
 
@@ -109,7 +136,15 @@ def generate_pipeline_code(spec: dict, modality: str, output_dir: Path) -> dict:
     select_lines = _select_lines(spec)
     expectation_lines, tests_carried_forward = _expectation_lines(spec)
     pii_transform_notes = _pii_transform_notes(spec, modality)
+    scd2_notes = _scd2_unsupported_notes(spec, modality)
     sequence_by_column = spec["merge_keys"][0] if spec["merge_keys"] else spec["columns"][0]["target"]
+
+    stored_as_scd_type = spec.get("stored_as_scd_type", 1)
+    track_history_columns = spec.get("track_history_columns") or []
+    track_history_kwarg_line = (
+        f'\n    track_history_column_list={json.dumps(track_history_columns)},'
+        if stored_as_scd_type == 2 else ""
+    )
 
     substitutions = {
         "target_table": spec["target_table"],
@@ -124,6 +159,8 @@ def generate_pipeline_code(spec: dict, modality: str, output_dir: Path) -> dict:
         "select_lines": select_lines,
         "expectation_lines": expectation_lines,
         "sequence_by_column": sequence_by_column,
+        "stored_as_scd_type": str(stored_as_scd_type),
+        "track_history_kwarg_line": track_history_kwarg_line,
     }
 
     generated_files = []
@@ -169,6 +206,7 @@ def generate_pipeline_code(spec: dict, modality: str, output_dir: Path) -> dict:
         "transform_spec_ref": str(spec_path.relative_to(output_dir)),
         "tests_carried_forward": tests_carried_forward,
         "pii_transform_notes": pii_transform_notes,
+        "scd2_notes": scd2_notes,
     }
 
 

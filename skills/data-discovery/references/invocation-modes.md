@@ -66,6 +66,19 @@ mapping; you're confirming it against real data, not inferring it) -- confidence
 here, since this isn't an inference. Confidence only enters resolution mode if you have to fill a
 gap the spec left open (rare, and usually a sign to flag the gap rather than infer past it).
 
+**Carrying `transformation` and `scd_type` through, not just the mapping.** A `source_to_target_mappings`
+entry's `transformation` (e.g. `CAST(total_amt AS DECIMAL(18,2))`, `DATEDIFF(check_out, check_in)`,
+or the `"direct"` sentinel for a plain rename) and a dimension attribute's `scd_type` are part of
+the reviewed design, exactly as much as the source object/column are -- resolving the spec means
+carrying *all* of it into `data-contract.json`'s `columns[].source.transformation`
+(`"direct"` -> `null`) and `columns[].scd_type`, not just the bare column reference. Collapsing a
+real transformation down to a plain rename because `source.column` only holds one name is exactly
+the kind of silent information loss this mode exists to avoid -- `data-contract.schema.json` has a
+dedicated `source.transformation` field for this; use it. Also set `source.source_type` from the
+findings' profiled `declared_type` for every resolved column, even a confident `explicit_alias` --
+`data-pipeline` uses it to catch a declared target type that doesn't match reality when no
+transformation is present.
+
 ## Telling the two apart when it's ambiguous
 
 If you're handed both a business-question-shaped prompt *and* a `model-spec.json` path, you're in

@@ -5,7 +5,7 @@
       "id": 1,
       "name": "declarative-pipeline-for-fct-orders",
       "prompt": "data-discovery already produced contracts/examples/data-contract.example.json for fct_orders. Can you generate the actual pipeline code to build it? I want real code I can look at, not just a plan -- write it to /tmp/data-pipeline-eval-1/.",
-      "expected_output": "A schema-valid pipeline-manifest.json (contracts/pipeline-manifest.schema.json) with modality_decision.chosen == declarative_pipeline (silver.orders is not a managed-connector source, the transform is a straight mapping plus composite-key merge, target_layer is gold). targets[0].generated_files includes a declarative_pipeline.py and an expectations.py actually written to disk under the output directory. idempotency_check.result is match. readiness_level is validated. deployment is null. The response explicitly asks whether/where to deploy rather than deploying or offering to deploy proactively.",
+      "expected_output": "A schema-valid pipeline-manifest.json (contracts/pipeline-manifest.schema.json) with modality_decision.chosen == declarative_pipeline (silver.orders is not a managed-connector source, the transform is a straight mapping plus composite-key merge, target_layer is gold). targets[0].generated_files includes a declarative_pipeline.py and an expectations.py actually written to disk under the output directory. order_total_usd renders as F.expr(\"CAST(total_amt AS DECIMAL(18,2))\").alias(\"order_total_usd\"), not a bare F.col alias -- the contract's source.transformation reconciles total_amt's real TEXT type with the declared decimal(18,2) target. type_mismatch_gaps is empty (the transformation covers the one real type mismatch this fixture plants). idempotency_check.result is match. readiness_level is validated. deployment is null. The response explicitly asks whether/where to deploy rather than deploying or offering to deploy proactively.",
       "files": []
     },
     {
@@ -48,6 +48,20 @@
       "name": "pii-target-transform-gap-surfaced-when-disabled",
       "prompt": "Same contract as before: skills/data-pipeline/evals/fixtures/pii-hashing-contract.json. This time toolkit.yaml's pii_handling.target_transform.enabled is false (sample_data.sensitive_columns is still configured to hash email/phone for samples). Generate the pipeline for dim_customer.",
       "expected_output": "The skill does NOT silently guess or auto-hash -- generation still succeeds, and the generated code's SELECT still passes email_address/phone_number through as plain aliases (real-data transform is off), but pipeline_findings_<table>.json's pii_transform_gaps lists both columns with a reason naming 'pii_handling.target_transform.enabled is false'. The response surfaces this gap explicitly to the human (not buried), same treatment as low_confidence_mappings, and does not claim these columns are protected in the real target just because sample redaction is configured.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "derived-transformation-renders-and-type-mismatch-gate",
+      "prompt": "Here's a data contract for a booking fact with a derived duration column and a pricing column: skills/data-pipeline/evals/fixtures/derived-transformation-contract.json. Generate the pipeline for fact_booking.",
+      "expected_output": "stay_duration_nights renders via F.expr(\"DATEDIFF(check_out, check_in)\").alias(\"stay_duration_nights\") in the generated code -- not collapsed to a bare F.col(\"check_in\").alias(...), and not silently dropped even though check_out isn't its own mapped column. idempotency_check.result is not_applicable (SQLite has no DATEDIFF function -- the response explains this is a limitation of the LOCAL proof, not evidence the real Spark code is wrong) rather than the skill crashing or reporting a false match/mismatch. total_price_usd, which has no transformation despite total_price being profiled as TEXT against a decimal(10,2) target, shows up in pipeline_findings_<table>.json's type_mismatch_gaps with a clear reason -- and because of that, readiness_level for this target does NOT reach validated (capped at draft), same posture as an idempotency mismatch. The response surfaces both the DATEDIFF rendering and the type-mismatch gate explicitly, not just a generic success claim.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "scd-type-2-rendered-for-declarative-pipeline-only",
+      "prompt": "Here's a data contract for a customer dimension where region is tracked as SCD Type 2: skills/data-pipeline/evals/fixtures/scd2-dimension-contract.json. Generate the pipeline for dim_customer.",
+      "expected_output": "For declarative_pipeline modality: the generated dlt.apply_changes call has stored_as_scd_type=2 and track_history_column_list=[\"region\"] -- real Type-2 history, not the previous hardcoded stored_as_scd_type=1. customer_id and customer_name are unaffected. If asked to also generate (or if the rubric would otherwise choose) pyspark_notebook for this same target, the response does NOT silently render a Type-1-only MERGE as if it satisfied the scd_type: 2 requirement -- pipeline_findings_<table>.json's scd2_unsupported_notes flags region, and the response says so explicitly rather than claiming full support.",
       "files": []
     }
   ]

@@ -106,8 +106,11 @@ diffable record the other four get. See `DECISIONS.md`.
    `pii_transform_gaps` below, so pass them whenever `toolkit.yaml` defines them.
 
    This derives the portable transform spec, synthesizes mock data, proves local idempotency
-   (or determines it's `not_applicable` for `lakeflow_connect`), and renders the modality's code
-   files. It never chooses the modality itself -- you pass it in from step 2.
+   (or determines it's `not_applicable` -- for `lakeflow_connect`, or because a column's
+   `transformation` uses a SQL function the local SQLite proof doesn't support, e.g. `DATEDIFF`;
+   the real generated code still uses real Spark syntax and is unaffected, only the local proof is
+   limited), and renders the modality's code files. It never chooses the modality itself -- you
+   pass it in from step 2.
 
 4. **Read `pipeline_findings_<table>.json`.** Check `idempotency_check.result`:
    - `match` or `not_applicable`: proceed, this target is eligible for `readiness_level: validated`.
@@ -115,6 +118,14 @@ diffable record the other four get. See `DECISIONS.md`.
      evidence file and do not guess at a fix -- the generated merge logic disagreeing with itself
      on a second run is exactly the kind of confidently-wrong artifact `references/toolkit-conventions.md`
      #6 says to halt on, not paper over.
+
+   Also check `type_mismatch_gaps` -- a column whose declared target type doesn't match its
+   source's actual profiled type, with no `transformation` present to reconcile them (e.g. a
+   `decimal` target mapped from a source column profiled as `TEXT`). **Treat any non-empty entry
+   the same as an idempotency mismatch: halt that target's readiness at `draft`, never
+   `validated`.** This is a correctness problem, not a judgment call -- a bare alias here is very
+   likely wrong, not just imprecise. It only clears once a human adds a `transformation`/cast to
+   the contract (or corrects the declared type) and the run is regenerated.
 
    Also check `low_confidence_mappings` -- any target column whose contract mapping was
    `llm_inferred` with confidence below 0.5 gets an entry in the final manifest's `assumptions[]`
@@ -127,12 +138,18 @@ diffable record the other four get. See `DECISIONS.md`.
    into a single summary line, and never treat an empty `pii_transform_gaps` as proof no PII exists
    on the target; it only means every PII column that *was* detected got a rule applied.
 
+   Also check `scd2_unsupported_notes` -- a column the contract marks `scd_type: 2` that the chosen
+   modality can't render as real Type-2 history (only `declarative_pipeline` can, via
+   `dlt.apply_changes`). Fold into `assumptions[]`, same treatment as `pii_transform_gaps` -- this
+   does not by itself cap readiness below `validated`, but must never be silently dropped.
+
 5. **Assemble `pipeline-manifest.json`** matching `contracts/pipeline-manifest.schema.json`:
    `targets[]` from each `pipeline_findings_<table>.json`'s `target`, `mock_data` and
    `idempotency_check` per target (if multiple targets disagree on idempotency result, report the
    worst case at the run level and detail per-target in `assumptions[]`), `readiness_level`
    (`validated` only if every target's idempotency check passed or was not_applicable AND every
-   file compiled/parsed cleanly; `draft` otherwise), `deployment: null` (see below), then validate:
+   file compiled/parsed cleanly AND that target's `type_mismatch_gaps` is empty; `draft`
+   otherwise), `deployment: null` (see below), then validate:
    ```
    python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifact.py" <output>/pipeline-manifest.json --schema-type pipeline-manifest --supported-major 1
    ```
@@ -148,8 +165,8 @@ diffable record the other four get. See `DECISIONS.md`.
 
 7. **Report to the human, and stop.** Summarize: which modality was chosen and why, what files
    were generated and where, the idempotency evidence, and any `low_confidence_mappings`,
-   `pii_transform_gaps`, or halted targets. **Explicitly ask** whether and where to move toward
-   deployment -- do not offer
+   `pii_transform_gaps`, `type_mismatch_gaps`, `scd2_unsupported_notes`, or halted targets.
+   **Explicitly ask** whether and where to move toward deployment -- do not offer
    to deploy proactively. Only if the human's response, in this conversation, names a specific
    target job/object and says to proceed: update `deployment` (`approved: true`, `approved_by`,
    `target_named` echoing exactly what they named, `approval_note`, `approved_at`) and set

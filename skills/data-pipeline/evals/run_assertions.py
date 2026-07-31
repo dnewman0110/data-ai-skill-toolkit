@@ -242,6 +242,124 @@ check("build_pipeline_findings succeeds end-to-end on the real example contract"
 check("build_pipeline_findings' idempotency_check result feeds through as 'match'",
       findings_ok["idempotency_check"]["result"] == "match")
 
+# -- 7. Derived-column transformations, the type-mismatch gate, SCD Type 2, and the two smaller
+#       bugs from DECISIONS.md decision 56 (real-engagement feedback: data-pipeline silently
+#       dropped every column transformation beyond a bare rename). --
+
+# fct_orders' own order_total_usd now carries source.transformation (CAST(total_amt AS
+# DECIMAL(18,2))) reconciling total_amt's real TEXT type with the declared decimal(18,2) target --
+# confirms the fix round-trips on the shipped example, not just a purpose-built fixture.
+fct_orders_code = (Path("/tmp/data_pipeline_eval_e2e") / findings_ok["target"]["generated_files"][0]["path"]).read_text()
+check("fct_orders' order_total_usd renders via F.expr(CAST...), not a bare F.col alias",
+      'F.expr("CAST(total_amt AS DECIMAL(18,2))")' in fct_orders_code)
+check("fct_orders' type_mismatch_gaps is empty now that the transformation reconciles the mismatch",
+      findings_ok["type_mismatch_gaps"] == [])
+
+# A transformation referencing a sibling column not otherwise mapped (DATEDIFF(check_out,
+# check_in) when only check_in is its own contract column) must not crash the local idempotency
+# proof -- SQLite has no DATEDIFF at all, so the proof legitimately can't run, but it must report
+# that honestly (not_applicable) rather than propagate a raw sqlite3.OperationalError.
+datediff_contract = {
+    "tables": [{
+        "name": "fact_booking", "target_catalog": "acme_retail_dev", "target_schema": "gold",
+        "columns": [
+            {"name": "booking_id", "type": "bigint", "nullable": False,
+             "source": {"object": "acme_retail_dev.silver.bookings", "column": "booking_id", "mapping_type": "explicit_alias"}},
+            {"name": "stay_duration_nights", "type": "int", "nullable": False,
+             "source": {"object": "acme_retail_dev.silver.bookings", "column": "check_in", "mapping_type": "explicit_alias",
+                        "transformation": "DATEDIFF(check_out, check_in)", "source_type": "date"}},
+        ],
+        "tests": [{"type": "uniqueness", "column": "booking_id", "params": {"columns": ["booking_id"]}, "threshold_basis": "explicit_constraint", "severity": "blocking"}],
+    }],
+}
+datediff_findings = build_pipeline_findings(datediff_contract, "fact_booking", "declarative_pipeline", Path("/tmp/data_pipeline_eval_datediff"))
+check("a transformation referencing a sibling column doesn't crash the run", datediff_findings["halted"] is False)
+check("its idempotency_check is honestly not_applicable rather than a crash",
+      datediff_findings["idempotency_check"]["result"] == "not_applicable")
+datediff_code = (Path("/tmp/data_pipeline_eval_datediff") / datediff_findings["target"]["generated_files"][0]["path"]).read_text()
+check("DATEDIFF renders via F.expr in the real generated code", 'F.expr("DATEDIFF(check_out, check_in)")' in datediff_code)
+compile(datediff_code, "datediff", "exec")
+
+# Type mismatch with no transformation: flagged, but generation still succeeds (never a crash) --
+# a bare alias is still written so nothing is hidden, but type_mismatch_gaps must be non-empty.
+mismatch_contract = {
+    "tables": [{
+        "name": "fct_orders_mismatch", "target_catalog": "acme_retail_dev", "target_schema": "gold",
+        "columns": [
+            {"name": "order_id", "type": "bigint", "nullable": False,
+             "source": {"object": "acme_retail_dev.silver.orders", "column": "order_id", "mapping_type": "explicit_alias"}},
+            {"name": "order_total_usd", "type": "decimal(18,2)", "nullable": False,
+             "source": {"object": "acme_retail_dev.silver.orders", "column": "total_amt", "mapping_type": "llm_inferred",
+                        "confidence": 0.45, "source_type": "TEXT"}},
+        ],
+        "tests": [{"type": "uniqueness", "column": "order_id", "params": {"columns": ["order_id"]}, "threshold_basis": "explicit_constraint", "severity": "blocking"}],
+    }],
+}
+mismatch_findings = build_pipeline_findings(mismatch_contract, "fct_orders_mismatch", "declarative_pipeline", Path("/tmp/data_pipeline_eval_mismatch"))
+check("a type mismatch with no transformation does not halt generation", mismatch_findings["halted"] is False)
+check("it is flagged in type_mismatch_gaps", len(mismatch_findings["type_mismatch_gaps"]) == 1)
+mismatch_code = (Path("/tmp/data_pipeline_eval_mismatch") / mismatch_findings["target"]["generated_files"][0]["path"]).read_text()
+check("the bare alias is still rendered (nothing hidden, just flagged)",
+      'F.col("total_amt").alias("order_total_usd")' in mismatch_code)
+
+# SCD Type 2: declarative_pipeline renders real apply_changes(stored_as_scd_type=2,
+# track_history_column_list=[...]); pyspark_notebook can't express it and must surface a gap
+# instead of silently ignoring the contract's scd_type: 2.
+scd2_contract = {
+    "tables": [{
+        "name": "dim_customer_scd2", "target_catalog": "acme_retail_dev", "target_schema": "gold",
+        "columns": [
+            {"name": "customer_id", "type": "bigint", "nullable": False,
+             "source": {"object": "acme_retail_dev.silver.customers", "column": "customer_id", "mapping_type": "explicit_alias"}},
+            {"name": "region", "type": "string", "nullable": True, "scd_type": 2,
+             "source": {"object": "acme_retail_dev.silver.customers", "column": "region", "mapping_type": "explicit_alias"}},
+        ],
+        "tests": [{"type": "uniqueness", "column": "customer_id", "params": {"columns": ["customer_id"]}, "threshold_basis": "explicit_constraint", "severity": "blocking"}],
+    }],
+}
+scd2_decl = build_pipeline_findings(scd2_contract, "dim_customer_scd2", "declarative_pipeline", Path("/tmp/data_pipeline_eval_scd2_decl"))
+scd2_decl_code = (Path("/tmp/data_pipeline_eval_scd2_decl") / scd2_decl["target"]["generated_files"][0]["path"]).read_text()
+check("declarative_pipeline renders stored_as_scd_type=2 for a scd_type: 2 attribute",
+      "stored_as_scd_type=2" in scd2_decl_code)
+check("declarative_pipeline renders track_history_column_list for the scd2 column",
+      'track_history_column_list=["region"]' in scd2_decl_code)
+compile(scd2_decl_code, "scd2_decl", "exec")
+
+scd2_pyspark = build_pipeline_findings(scd2_contract, "dim_customer_scd2", "pyspark_notebook", Path("/tmp/data_pipeline_eval_scd2_pyspark"))
+check("pyspark_notebook surfaces scd2_unsupported_notes instead of silently ignoring scd_type: 2",
+      len(scd2_pyspark["scd2_unsupported_notes"]) == 1)
+
+no_key_scd2_contract = {
+    "tables": [{
+        "name": "dim_bad_scd2", "target_catalog": "acme_retail_dev", "target_schema": "gold",
+        "columns": [
+            {"name": "region", "type": "string", "nullable": True, "scd_type": 2,
+             "source": {"object": "acme_retail_dev.silver.customers", "column": "region", "mapping_type": "explicit_alias"}},
+        ],
+        "tests": [],
+    }],
+}
+try:
+    build_transform_spec(no_key_scd2_contract, "dim_bad_scd2")
+    check("build_transform_spec refuses scd_type: 2 with no merge keys", False)
+except ValueError as e:
+    check("build_transform_spec refuses scd_type: 2 with no merge keys", "no merge keys" in str(e))
+
+# Bridge/junction table (every column is a merge key) no longer crashes the local idempotency
+# proof -- regression test for the empty-update_clause bug (DECISIONS.md decision 56).
+bridge_spec = {
+    "target_table": "bridge_property_amenity", "source_schema": "silver", "source_table": "property_amenity",
+    "merge_keys": ["property_id", "amenity_id"],
+    "columns": [
+        {"target": "property_id", "source_column": "property_id", "target_transform": None},
+        {"target": "amenity_id", "source_column": "amenity_id", "target_transform": None},
+    ],
+}
+bridge_mock_rows = [{"property_id": 1, "amenity_id": 2}, {"property_id": 1, "amenity_id": 3}]
+bridge_idem = validate_pipeline_locally(bridge_spec, bridge_mock_rows)
+check("an all-merge-key (bridge table) spec no longer raises OperationalError",
+      bridge_idem["result"] == "match")
+
 print()
 if failures:
     print(f"FAIL: {len(failures)} assertion(s) failed.")

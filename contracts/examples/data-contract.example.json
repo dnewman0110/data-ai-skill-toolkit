@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "run": {
     "schema_version": "1.0.0",
     "run_id": "01J8Z3N7K2QZ8F6XG5T9M0R4WE",
@@ -57,21 +57,21 @@
           "type": "bigint",
           "nullable": false,
           "pii_tag": null,
-          "source": { "object": "acme_retail_dev.silver.orders", "column": "order_id", "mapping_type": "explicit_alias" }
+          "source": { "object": "acme_retail_dev.silver.orders", "column": "order_id", "mapping_type": "explicit_alias", "source_type": "INTEGER" }
         },
         {
           "name": "line_number",
           "type": "int",
           "nullable": false,
           "pii_tag": null,
-          "source": { "object": "acme_retail_dev.silver.orders", "column": "line_number", "mapping_type": "explicit_alias" }
+          "source": { "object": "acme_retail_dev.silver.orders", "column": "line_number", "mapping_type": "explicit_alias", "source_type": "INTEGER" }
         },
         {
           "name": "customer_id",
           "type": "bigint",
           "nullable": false,
           "pii_tag": null,
-          "source": { "object": "acme_retail_dev.silver.orders", "column": "customer_id", "mapping_type": "name_and_type_match" }
+          "source": { "object": "acme_retail_dev.silver.orders", "column": "customer_id", "mapping_type": "name_and_type_match", "source_type": "INTEGER" }
         },
         {
           "name": "order_total_usd",
@@ -83,7 +83,9 @@
             "column": "total_amt",
             "mapping_type": "llm_inferred",
             "confidence": 0.45,
-            "basis": "0.2-0.49: column name 'total_amt' and decimal type are consistent with an order total, but no comment, constraint, or naming convention confirms it; not corroborated by profiling beyond plausible value ranges."
+            "basis": "0.2-0.49: column name 'total_amt' and decimal type are consistent with an order total, but no comment, constraint, or naming convention confirms it; not corroborated by profiling beyond plausible value ranges.",
+            "source_type": "TEXT",
+            "transformation": "CAST(total_amt AS DECIMAL(18,2))"
           }
         }
       ],

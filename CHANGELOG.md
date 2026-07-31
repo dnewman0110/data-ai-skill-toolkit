@@ -193,6 +193,24 @@ README.md "Versioning" for how this relates to per-skill and per-schema versions
   correctly coerces numeric-looking text before comparing (working as designed). Caught by the
   Phase 3 sign-off run actually comparing the two and finding zero `changed` discrepancies where
   the doc predicted one.
+- `toolkit.yaml`'s `sample_data.sensitive_columns` (email/phone hashing etc.) only ever redacted
+  *samples* -- `data-pipeline`'s generated code had zero references to it, so a real target table
+  got real, untransformed PII. Added a separate, opt-in `pii_handling.target_transform` config;
+  `data-pipeline` now actually hashes tagged columns in generated code when enabled, and always
+  surfaces a column it couldn't (`pii_transform_gaps`) rather than silently passing it through. See
+  DECISIONS.md decision 55.
+- `data-pipeline` silently dropped every column transformation beyond a bare rename -- found on a
+  real engagement run and reproduced in this toolkit's own shipped `data-contract.example.json`
+  (`order_total_usd` mapped from a TEXT source with no cast, ever). `data-contract.schema.json`
+  gained optional `source.transformation`, `source.source_type`, and `scd_type` fields (minor,
+  non-breaking -- bumped touched examples to `1.1.0`); `data-pipeline` now renders a contract's
+  `transformation` as a real `F.expr(...)` expression, flags a declared-vs-actual type mismatch
+  with no transformation present (`type_mismatch_gaps`, caps `readiness_level` at `draft`), and
+  renders real SCD Type 2 history (`stored_as_scd_type=2` + `track_history_column_list`) for
+  `declarative_pipeline` instead of the previous hardcoded Type 1. Also fixed: a pure bridge/
+  junction table (every column a merge key) crashing the local idempotency proof
+  (`sqlite3.OperationalError: incomplete input`) -- now falls back to `DO NOTHING`. See
+  DECISIONS.md decision 56.
 
-All contract schemas start at `schema_version` major 1 (`1.0.0`). No breaking changes yet -- there's
-nothing to break.
+All contract schemas started at `schema_version` major 1 (`1.0.0`); `data-contract` has since taken
+a minor, non-breaking bump to `1.1.0` (new optional fields only). No breaking (major) changes yet.

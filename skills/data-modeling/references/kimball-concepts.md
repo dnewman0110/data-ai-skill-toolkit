@@ -32,6 +32,14 @@ doesn't imply additive, and a value stored as `TEXT` (like this toolkit's own fi
 `source_to_target_mappings[].transformation` before it can be treated as any numeric category at
 all.
 
+**`transformation` must be a bare, executable SQL expression -- no trailing `--` commentary
+inside it.** `data-pipeline` (via `data-discovery`'s resolution mode) renders this string verbatim
+into generated PySpark/SQL; a comment embedded in the expression risks being parsed as part of the
+SQL by whatever consumes it, not treated as documentation. Use the sentinel `"direct"` for a plain
+rename (no transformation needed), a bare expression like `"CAST(total_amt AS DECIMAL(18,2))"` or
+`"DATEDIFF(check_out, check_in)"` for a real one, and put any rationale for *why* in this fact's
+`assumptions[]` entry instead, same as any other design decision worth explaining.
+
 ## Degenerate dimensions
 
 An operational identifier that lives ON the fact table itself rather than in its own dimension

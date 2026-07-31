@@ -902,4 +902,98 @@ just accepted on the subagent's word.
     not byte-identical to the real Spark `F.sha2(...)` the actual generated code uses, the same
     "close enough" standard the rest of that script's SQL dialect already claims.
 
+56. **`data-pipeline` silently dropped every column transformation beyond a bare rename -- found
+    on a real engagement run (`samples.wanderbricks`, full chain: discovery -> modeling -> pipeline
+    -> deployment). Fixed, and it exposed the same bug already live in this toolkit's own shipped
+    example.** `model-spec.json`'s `source_to_target_mappings[].transformation` is a required field
+    (the shipped example already used it correctly -- `CAST(total_amt AS DECIMAL(18,2))` for a real
+    TEXT-vs-decimal mismatch, `"direct"` for a plain rename) but `data-contract.schema.json` had no
+    field to carry it into, so resolution mode collapsed every mapping to a bare column reference
+    and `build_transform_spec.py`/`generate_pipeline_code.py` rendered a plain `F.col(x).alias(y)`
+    for every column, transformation-worthy or not. `contracts/examples/data-contract.example.json`
+    was exhibiting this exact bug, live: `order_total_usd` (decimal) mapped from `total_amt`, which
+    `fixtures/generate_fixtures.py` declares `TEXT`, with zero cast recorded anywhere but prose in
+    `assumptions[]`. Fixed the example alongside the code, not just added a new fixture for it --
+    same standard `CHANGELOG.md`'s prior example-artifact fixes already hold this toolkit to.
+
+    Added three optional (schema-non-breaking, no major bump; touched examples bumped to `1.1.0`)
+    fields to `data-contract.schema.json`'s columns: `source.transformation` (a SQL expression,
+    carried verbatim from model-spec's `transformation` during resolution, `"direct"` -> `null`),
+    `source.source_type` (the source column's actual profiled type, from `declared_type` --
+    `profile_object.py` already computes it, this was purely about not throwing it away), and
+    `scd_type` (from a resolved dimension attribute). `data-contract.json` is agent-assembled
+    (`data-discovery`'s own step 5), not script-generated, so carrying these through was a
+    `SKILL.md`/`references/invocation-modes.md` instruction change, not new discovery code.
+
+    **General expression rendering, not a fixed template library** -- `DATEDIFF`/date-key casts are
+    common but not exhaustive; a curated set wouldn't have fixed the wanderbricks case in general.
+    Safety: a `transformation` string is LLM/human-authored and flows into a generated `.py` file --
+    never string-concatenated into Python source. PySpark renders it as
+    `F.expr(json.dumps(transformation))`; `json.dumps` guarantees a correctly-escaped Python string
+    literal, so the string can't break out of the call no matter what it contains, and the SQL
+    itself still runs through Spark's own parser -- the same trust boundary this toolkit already
+    accepts for everything a human reviews before deployment. Also fixed
+    `model-spec.example.json`'s `order_total_usd` mapping, which had embedded its rationale as a
+    trailing `-- comment` *inside* the transformation string -- harmless when the field was never
+    rendered, actively dangerous now that it is (a trailing line-comment inside `render_select_sql`'s
+    wrapping parens can swallow the parens' own close and the `AS` clause after it). Moved the
+    rationale to `assumptions[]` where it belongs and added a rule to
+    `data-modeling/references/kimball-concepts.md`: `transformation` must be a bare, executable
+    expression, never annotated inline. `render_select_sql` still wraps every expression as
+    `(expr)\nAS target` as defense in depth against a *future* violation of that rule, not as the
+    primary fix.
+
+    **The type-mismatch gate is deliberately coarse** -- bucketed into numeric/string/date/
+    timestamp/boolean/binary categories rather than comparing type strings verbatim (exact matching
+    would flag harmless cross-system spelling like `INTEGER` vs `bigint` on nearly every column).
+    Flags only when both sides classify into known, *different* buckets; an unrecognized type on
+    either side never flags -- "never guess," applied in the safe direction. Per your explicit
+    decision, a non-empty `type_mismatch_gaps` **caps that target's `readiness_level` at `draft`**,
+    the same posture `SKILL.md` already used for an idempotency mismatch -- a column that can't
+    safely render is a correctness problem, not a business judgment call the way the PII-hashing
+    gap (decision 55) was; generation still succeeds and writes the file, it just can't reach
+    `validated` until a human adds a `transformation` and regenerates.
+
+    **SCD Type 2**: `templates/declarative_pipeline.py.tmpl` hardcoded `stored_as_scd_type=1` with
+    no substitution variable at all -- `data-pipeline` could not generate a Type-2 SCD dimension,
+    despite `model-spec.json` already carrying `scd_type` per attribute. Now driven from the
+    contract's `scd_type`, scoped to `declarative_pipeline` modality only (`dlt.apply_changes`
+    natively supports `stored_as_scd_type=2` + `track_history_column_list`); `pyspark_notebook`/
+    `lakeflow_connect` surface it as an unsupported-modality gap (`scd2_unsupported_notes`) rather
+    than silently ignoring it -- hand-rolled Delta MERGE has no built-in expire-and-insert-new-
+    version semantics, that's genuinely complex_procedural logic, not template-safe. A target with
+    an `scd_type: 2` attribute but no merge keys is a structural `ValueError` (there's no key to
+    track history against), same posture as the existing multi-source-object refusal.
+
+    **A gap this surfaced mid-fix, closed rather than left as a known limitation**: a transformation
+    referencing a sibling column not otherwise mapped (`DATEDIFF(check_out, check_in)` when only
+    `check_in` has its own contract column) would have crashed the local idempotency proof outright
+    -- `derive_mock_data.py` only ever synthesized values for each column's own `source_column`, and
+    the mock SQLite source table was built the same way, so `check_out` simply wouldn't exist when
+    the rendered SQL referenced it. The REAL generated code was never at risk (`F.expr` runs against
+    the full source DataFrame in a real Spark session, not just mapped columns) -- only the local
+    proof's narrow mock table. Added best-effort identifier extraction (`_referenced_identifiers`, a
+    denylist of common SQL keywords/functions, explicitly not a real SQL parser) so
+    `extra_source_columns` get synthesized mock values and a mock-table column too.
+
+    **A second, harder limit accepted rather than worked around**: SQLite has no `DATEDIFF` (or most
+    other Spark-specific SQL functions) at all, so the local idempotency proof genuinely cannot run
+    for many real transformations, full stop -- no amount of mock-data plumbing fixes that.
+    `validate_pipeline_locally` now catches `sqlite3.OperationalError` from rendering/executing the
+    portable SQL and reports `result: "not_applicable"` with an honest reason, instead of crashing
+    the whole run on exactly the case this fix exists to support. Reused the existing `not_applicable`
+    enum value (no `pipeline-manifest.schema.json` change) rather than adding a new `"skipped"`
+    value -- it already means "we didn't produce match/mismatch evidence locally," which covers this
+    case too, and `SKILL.md` already treats it as eligible for `validated`, same as lakeflow_connect's
+    existing use of it. The two reasons are distinguishable only via the `method` string, not a
+    separate field -- an acceptable precision loss to avoid a schema change, not an oversight.
+
+    **Two smaller, unrelated bugs found in the same engagement run, fixed opportunistically**:
+    `validate_pipeline_locally.py::_apply_merge` built `DO UPDATE SET {update_clause}` from
+    non-key target columns only -- empty for a pure bridge/junction table where every column is a
+    merge key, producing invalid SQL. Reproduced (`sqlite3.OperationalError: incomplete input`)
+    before fixing; now falls back to `ON CONFLICT ... DO NOTHING` when there's nothing to update,
+    which is also the semantically correct behavior (an all-key upsert has nothing to update on a
+    match).
+
 *(Further decisions will be appended here as later phases proceed.)*

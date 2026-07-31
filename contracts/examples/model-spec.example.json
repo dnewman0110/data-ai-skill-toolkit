@@ -53,7 +53,7 @@
         { "column": "order_id", "source_system_identifier": "silver.orders.order_id" }
       ],
       "source_to_target_mappings": [
-        { "target_column": "order_total_usd", "source_object": "acme_retail_dev.silver.orders", "source_column": "total_amt", "transformation": "CAST(total_amt AS DECIMAL(18,2)) -- source column is declared TEXT pending a source-system fix per its column comment; downstream consumers must cast, not assume it's already numeric." },
+        { "target_column": "order_total_usd", "source_object": "acme_retail_dev.silver.orders", "source_column": "total_amt", "transformation": "CAST(total_amt AS DECIMAL(18,2))" },
         { "target_column": "quantity", "source_object": "acme_retail_dev.silver.orders", "source_column": "quantity", "transformation": "direct" }
       ]
     }
@@ -86,6 +86,10 @@
     {
       "statement": "Assumed 'revenue' in business questions means order_total_usd net of returns; silver.orders does not separate returns into a distinct table.",
       "basis": "No returns table found in silver schema; flagged for human confirmation before this measure is treated as authoritative for finance reporting."
+    },
+    {
+      "statement": "order_total_usd's transformation casts total_amt to DECIMAL(18,2) because the source column is declared TEXT pending a source-system fix.",
+      "basis": "silver.orders.total_amt's own column comment documents this; downstream consumers must cast, not assume it's already numeric. Recorded here rather than inline in transformation because data-pipeline renders that field verbatim as an executable SQL expression -- a trailing comment there risks being parsed as part of the expression rather than documentation."
     }
   ]
 }

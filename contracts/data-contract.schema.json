@@ -169,6 +169,14 @@
                   ],
                   "description": "Sensitivity tag from toolkit.yaml, if any. Drives redaction in sample_records and in anything sent to an LLM."
                 },
+                "scd_type": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "enum": [0, 1, 2, 3, null],
+                  "description": "Carried verbatim from model-spec.json's dimensions[].attributes[].scd_type during resolution mode; null in greenfield mode or for fact columns. data-pipeline only knows how to render type 2 (declarative_pipeline modality); a non-null, non-2 value is carried for documentation but does not change generated code."
+                },
                 "source": {
                   "type": "object",
                   "additionalProperties": false,
@@ -207,6 +215,20 @@
                         "null"
                       ],
                       "description": "Required when mapping_type is llm_inferred: what evidence grounded the inference."
+                    },
+                    "transformation": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "A SQL expression to compute this column from source.object's columns (e.g. 'DATEDIFF(check_out, check_in)'), or null for a plain rename. Carried from model-spec.json's source_to_target_mappings[].transformation during resolution mode (its 'direct' sentinel translates to null here); may also be set directly in greenfield mode when a plain rename can't satisfy the target's declared type. data-pipeline renders this verbatim as a Spark SQL expression -- never invents one."
+                    },
+                    "source_type": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The source column's actual profiled/declared type (discovery_findings.json's declared_type), independent of what mapping_type says about the mapping's confidence. Lets data-pipeline catch a declared target type that doesn't match reality and no transformation present, rather than silently rendering a bare alias that will fail or misbehave at runtime."
                     }
                   }
                 }

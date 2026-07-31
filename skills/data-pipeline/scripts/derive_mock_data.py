@@ -61,8 +61,26 @@ def _gen_value(col: dict, row_index: int, is_key: bool, rng: random.Random):
     return f"{name}_{row_index}"
 
 
-def derive_mock_data(table: dict, row_count: int = 50, seed: int = 1337) -> list[dict]:
-    """Returns rows keyed by SOURCE column name (see module docstring for why)."""
+def _gen_value_for_unknown_column(name: str, row_index: int, rng: random.Random):
+    """For an extra_source_column -- a column a transformation expression references (e.g.
+    check_out in "DATEDIFF(check_out, check_in)") that isn't itself any column's own mapped
+    source_column, so the contract records no declared type for it. Best-effort, name-based
+    heuristic (mirrors _gen_value's id-shaped heuristic), not a real type inference."""
+    lname = name.lower()
+    if re.search(r"(^|_)id$", lname):
+        return 100000 + row_index
+    if re.search(r"date|_at$|_on$", lname):
+        d = datetime(2025, 1, 1) + timedelta(days=rng.randint(0, 550))
+        return d.strftime("%Y-%m-%d")
+    return f"{lname}_{row_index}"
+
+
+def derive_mock_data(table: dict, row_count: int = 50, seed: int = 1337,
+                      extra_source_columns: list[str] = None) -> list[dict]:
+    """Returns rows keyed by SOURCE column name (see module docstring for why). extra_source_columns
+    (from build_transform_spec.py's spec) are identifiers a transformation expression references
+    that aren't themselves any column's own mapped source_column -- synthesized so the local
+    idempotency proof's mock_source table has every column render_select_sql's SQL will reference."""
     rng = random.Random(seed)
     tests = table.get("tests", [])
     uniqueness_tests = [t for t in tests if t["type"] == "uniqueness"]
@@ -71,6 +89,7 @@ def derive_mock_data(table: dict, row_count: int = 50, seed: int = 1337) -> list
         key_columns.update(t.get("params", {}).get("columns", [t["column"]]))
 
     null_rates = {c["name"]: _null_rate_for_column(c, tests) for c in table["columns"]}
+    extra_source_columns = extra_source_columns or []
 
     rows = []
     for i in range(row_count):
@@ -82,6 +101,8 @@ def derive_mock_data(table: dict, row_count: int = 50, seed: int = 1337) -> list
                 row[source_col] = None
                 continue
             row[source_col] = _gen_value(col, i, name in key_columns, rng)
+        for extra_col in extra_source_columns:
+            row[extra_col] = _gen_value_for_unknown_column(extra_col, i, rng)
         rows.append(row)
     return rows
 

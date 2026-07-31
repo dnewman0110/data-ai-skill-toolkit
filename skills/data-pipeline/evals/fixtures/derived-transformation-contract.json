@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.1.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3EVAL0DERIVEDXFORM001",
+    "skill": { "name": "data-discovery", "version": "1.0.0" },
+    "timestamp": "2026-07-31T12:00:00Z",
+    "target": { "platform": "azure", "catalog_type": "unity_catalog", "workspace_id": "adb-example-123456789.12.azuredatabricks.net", "catalog": "acme_retail_dev", "schema": "silver" },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "not_applicable",
+    "source_fingerprints": [],
+    "telemetry": { "estimated_bytes_scanned": 0, "estimated_rows_scanned": 0, "thresholds_applied": { "max_rows_scanned": null, "max_bytes_scanned": null, "max_wall_clock_seconds": null } },
+    "previous_run_id": null
+  },
+  "contract_id": "acme-fact-booking-derived-transform-v1",
+  "invocation_mode": "resolution",
+  "source_model_spec_ref": null,
+  "grain_determination": { "method": "explicit_constraint", "confidence_basis": "booking_id is the source system's own primary key" },
+  "tables": [
+    {
+      "name": "fact_booking",
+      "target_catalog": "acme_retail_dev",
+      "target_schema": "gold",
+      "grain": { "statement": "One row per booking.", "determination": "explicit_constraint", "basis": "silver.bookings.booking_id is the source system's own primary key." },
+      "columns": [
+        { "name": "booking_id", "type": "bigint", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.bookings", "column": "booking_id", "mapping_type": "explicit_alias", "source_type": "INTEGER" } },
+        { "name": "stay_duration_nights", "type": "int", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.bookings", "column": "check_in", "mapping_type": "explicit_alias", "source_type": "date", "transformation": "DATEDIFF(check_out, check_in)" } },
+        { "name": "total_price_usd", "type": "decimal(10,2)", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.silver.bookings", "column": "total_price", "mapping_type": "llm_inferred", "confidence": 0.4, "basis": "0.2-0.49: column name and profiled value ranges are consistent with a price, but not corroborated by an explicit comment or constraint.", "source_type": "TEXT" } }
+      ],
+      "tests": [
+        { "type": "uniqueness", "column": "booking_id", "params": { "columns": ["booking_id"] }, "threshold_basis": "explicit_constraint", "severity": "blocking" }
+      ],
+      "sample_records": [],
+      "row_count_estimate": 0
+    }
+  ],
+  "unresolved_requirements": [],
+  "assumptions": [
+    {
+      "statement": "stay_duration_nights is computed as DATEDIFF(check_out, check_in) since silver.bookings has no pre-computed duration column.",
+      "basis": "Carried from model-spec.json's source_to_target_mappings[].transformation during resolution -- see data-discovery/references/invocation-modes.md."
+    },
+    {
+      "statement": "total_price_usd has no transformation recorded despite total_price being profiled as TEXT -- deliberate, for eval purposes, to exercise data-pipeline's type_mismatch_gaps gate.",
+      "basis": "This is a fixture designed to demonstrate the gate firing, not a real unresolved mapping."
+    }
+  ]
+}

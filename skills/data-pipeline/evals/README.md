@@ -24,25 +24,33 @@ declarative_pipeline, and falls back to pyspark_notebook when declarative_pipeli
 nullability and uniqueness; the local idempotency proof (a real match on the example contract, and
 a documented case showing the detector distinguishes "duplicate-but-consistent" from a genuine
 mismatch); code generation for all three modalities with a real Python `compile()` syntax check on
-every generated `.py` file; and a full transform-spec-to-validated-`pipeline-manifest.json`
-end-to-end smoke test that also exercises `validate_artifact.py`. This is what
-`.github/workflows/validate.yml` runs on every PR. 33 checks, all passing as of this build.
+every generated `.py` file; a full transform-spec-to-validated-`pipeline-manifest.json`
+end-to-end smoke test that also exercises `validate_artifact.py`; and, added for DECISIONS.md
+decision 56, derived-column transformation rendering (`F.expr(...)`), the type-mismatch gate
+(flags and caps `readiness_level`, never crashes), SCD Type 2 rendering and its scoping to
+`declarative_pipeline` only, the all-merge-key bridge-table fix, and a transformation referencing
+a sibling column not otherwise mapped (SQLite has no `DATEDIFF`, so this exercises the
+`not_applicable`-not-a-crash path). This is what `.github/workflows/validate.yml` runs on every
+PR. 51 checks, all passing as of this build.
 
 ## 2. Scenario evals (`evals.json` / `eval_metadata.json`) -- require a subagent with the skill loaded
 
-Seven scenarios: the modality rubric choosing correctly on a normal reshaping target (eval 1,
+Nine scenarios: the modality rubric choosing correctly on a normal reshaping target (eval 1,
 using the same `fct_orders` contract every other skill's evals reference), choosing
 `lakeflow_connect` for a genuinely managed-connector bronze landing (eval 2, using a purpose-built
 fixture contract under `evals/fixtures/` since the toolkit's own fixture lakehouse has no
 external-system source), routing a multi-source join to `pyspark_notebook` rather than forcing a
 broken single-source spec (eval 3, same fixture pattern), declining to re-enter code-generation
 mode for what's actually a post-load correctness question (eval 4), refusing to advance past
-`validated` on a vague "go ahead and deploy it" that doesn't name a specific target (eval 5), and
--- added when `pii_handling.target_transform` was introduced (DECISIONS.md decision 55) -- real
-target-data hashing actually applying when `toolkit.yaml` enables it (eval 6, using
+`validated` on a vague "go ahead and deploy it" that doesn't name a specific target (eval 5),
+real target-data hashing actually applying when `toolkit.yaml` enables it (eval 6, using
 `evals/fixtures/pii-hashing-contract.json`) and the gap being surfaced loudly in
 `pii_transform_gaps` rather than silently guessed or silently dropped when it's disabled (eval 7,
-same fixture).
+same fixture), and -- added for DECISIONS.md decision 56 -- a derived transformation rendering
+correctly alongside a type mismatch capping `readiness_level` at `draft` (eval 8, using
+`evals/fixtures/derived-transformation-contract.json`) and SCD Type 2 rendering for
+`declarative_pipeline` while `pyspark_notebook` surfaces it as an unsupported gap instead of
+silently ignoring it (eval 9, using `evals/fixtures/scd2-dimension-contract.json`).
 
 **Phase 2 sign-off evidence**: eval 1 (the fullest scenario -- modality classification, code
 generation, idempotency evidence, and the deployment-gate language all in one run) was run as a
@@ -56,10 +64,11 @@ against the same fixture contracts; evals 4 and 5 rely on the skill description,
 consistent with how the prior three skills' Phase 1/2 sign-offs handled their own equivalent
 cases. Re-run 2, 3, 4, and 5 as full subagent scenarios before this touches a real engagement --
 eval 5 in particular is worth re-running any time `SKILL.md`'s deployment-gate language changes.
-Evals 6 and 7's *mechanism* (hash rendering, and `target_transform_gaps` population) was verified
-directly against `build_transform_spec`/`generate_pipeline_code`/`build_pipeline_manifest` rather
-than via a subagent run when this was added -- run 6 and 7 as full subagent scenarios at least once
-before this touches a real engagement, same as 2-5.
+Evals 6-9's *mechanisms* (hash rendering, `target_transform_gaps`/`type_mismatch_gaps`/
+`scd2_unsupported_notes` population, `F.expr` rendering, SCD Type 2 template substitution) were all
+verified directly against `build_transform_spec`/`generate_pipeline_code`/`build_pipeline_manifest`
+rather than via a subagent run when each was added -- run 6-9 as full subagent scenarios at least
+once before this touches a real engagement, same as 2-5.
 
 To re-run a scenario eval yourself: spawn an agent with access to this repo, point it at
 `skills/data-pipeline/SKILL.md`, and give it the `prompt` field from the matching entry in

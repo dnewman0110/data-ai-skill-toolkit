@@ -31,5 +31,5 @@ dlt.apply_changes(
     # source data-contract and used the first merge key as a placeholder -- verify this before
     # relying on it; see the run's assumptions[] entry for this target.
     sequence_by=F.col("$sequence_by_column"),
-    stored_as_scd_type=1,
+    stored_as_scd_type=$stored_as_scd_type,$track_history_kwarg_line
 )

@@ -104,6 +104,19 @@ Full detail, including how to tell which mode you're in and what "narrow" means 
      set `mapping_type: llm_inferred` with confidence + basis. Resolution: match the model-spec's
      `source_to_target_mappings` against the findings' columns; anything not found becomes an
      `unresolved_requirements[]` entry with a reason, never a silent drop.
+   - **Carry `source_to_target_mappings[].transformation` through into `source.transformation`**
+     (resolution mode) -- verbatim, translating the `"direct"` sentinel to `null`. A model-spec's
+     `CAST(...)`/`DATEDIFF(...)`/etc. is a reviewed design decision, not something to collapse to a
+     bare column reference just because `data-contract.schema.json`'s `source.column` only takes a
+     single name -- `source.transformation` is exactly the field for this; `data-pipeline` renders
+     it verbatim and does not re-derive it. Likewise carry a resolved dimension attribute's
+     `scd_type` through into the column's `scd_type`.
+   - **Set `source.source_type` from the findings' `declared_type`, in both modes.** This is
+     already-measured data (`profile_object.py` computed it; you're not inferring anything) --
+     it's what lets `data-pipeline` catch a declared target type that doesn't actually match the
+     source and no `transformation` was given, instead of silently rendering a bare alias that's
+     wrong. Set it even when the mapping is a confident `explicit_alias` with no type concerns --
+     the check downstream is mechanical, not a comment on this mapping's confidence.
    - **Carry every `findings[]` entry into `assumptions[]`** in the final contract, verbatim or
      lightly reworded -- these are exactly the kind of thing `references/toolkit-conventions.md`
      #6 means by "never silently infer."

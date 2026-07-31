@@ -42,7 +42,8 @@ def build_pipeline_findings(contract: dict, table_name: str, modality: str,
     except ValueError as e:
         return {"halted": True, "reason": str(e), "targets": None}
 
-    mock_rows = derive_mock_data(table, row_count=mock_row_count, seed=mock_seed)
+    mock_rows = derive_mock_data(table, row_count=mock_row_count, seed=mock_seed,
+                                  extra_source_columns=spec.get("extra_source_columns"))
     mock_dir = output_dir / "mock_data"
     mock_dir.mkdir(parents=True, exist_ok=True)
     # Filename is qualified by TARGET table, not just source table -- mock data content depends on
@@ -98,6 +99,14 @@ def build_pipeline_findings(contract: dict, table_name: str, modality: str,
         # generate_pipeline_code.py's _pii_transform_notes. Never silently dropped: SKILL.md step 4
         # folds this into the final manifest's assumptions[], same treatment as low_confidence_mappings.
         "pii_transform_gaps": spec["target_transform_gaps"] + codegen["pii_transform_notes"],
+        # A declared target type that doesn't match the source's actual profiled type with no
+        # transformation present -- unlike the gaps above, SKILL.md step 4 caps this target's
+        # readiness_level at draft rather than just surfacing it, since a bare alias here is very
+        # likely wrong, not a business judgment call a human might reasonably accept as-is.
+        "type_mismatch_gaps": spec["type_mismatch_gaps"],
+        # SCD Type 2 requested (model-spec's scd_type: 2) but the chosen modality can't render it --
+        # see generate_pipeline_code.py's _scd2_unsupported_notes.
+        "scd2_unsupported_notes": codegen["scd2_notes"],
     }
 
 
