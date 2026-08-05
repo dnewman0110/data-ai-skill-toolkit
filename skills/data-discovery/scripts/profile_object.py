@@ -32,8 +32,12 @@ def profile_table(adapter: LakehouseAdapter, schema: str, table: str, sample_siz
     table_comment = adapter.get_table_comment(schema, table)
     total_rows = adapter.row_count(schema, table, exact=True)
 
+    # money/smallmoney/bit are SQL-Server-specific numeric declarations -- without them, a
+    # column declared e.g. `money` is treated as "not declared numeric," and since its sampled
+    # values parse as floats, wrongly triggers the TEXT/VARCHAR-vs-numeric mismatch heuristic
+    # below with a finding that misstates the column's own declared type.
     numeric_types = {"integer", "int", "bigint", "smallint", "real", "double", "float",
-                      "decimal", "numeric"}
+                      "decimal", "numeric", "money", "smallmoney", "bit"}
 
     column_profiles = []
     for col in columns:
@@ -108,34 +112,56 @@ def profile_table(adapter: LakehouseAdapter, schema: str, table: str, sample_siz
         if natural_key_pattern.search(col.name) and (col.name,) not in already_checked:
             key_candidates_to_check.append(("natural_key_naming_heuristic", [col.name]))
 
+    # Each check runs in its own try/except: one candidate-key or FK check failing (a backend-
+    # specific query error, a transient connection drop) degrades to a flagged finding with an
+    # "error" field rather than aborting profile_table entirely and discarding every check already
+    # completed successfully for this table. Caught broadly (not a specific driver exception type)
+    # since profile_object.py is backend-agnostic and doesn't know which adapter it's talking to.
     for source, cols in key_candidates_to_check:
-        result = adapter.check_uniqueness(schema, table, cols, sample_size=sample_size)
-        candidate_keys.append({
-            "columns": cols, "source": source,
-            "rows_checked": result["rows_checked"], "rows_with_null_key": result["rows_with_null_key"],
-            "distinct_count": result["distinct_count"],
-            "is_unique": result["is_unique"], "duplicate_count": result["duplicate_count"],
-            "checked_full_population": result["rows_checked"] >= total_rows,
-        })
+        try:
+            result = adapter.check_uniqueness(schema, table, cols, sample_size=sample_size)
+            candidate_keys.append({
+                "columns": cols, "source": source,
+                "rows_checked": result["rows_checked"], "rows_with_null_key": result["rows_with_null_key"],
+                "distinct_count": result["distinct_count"],
+                "is_unique": result["is_unique"], "duplicate_count": result["duplicate_count"],
+                "checked_full_population": result["rows_checked"] >= total_rows,
+            })
+        except Exception as e:
+            candidate_keys.append({"columns": cols, "source": source, "error": str(e)})
 
     fk_checks = []
     for fk in constraints.foreign_keys:
         col = fk["columns"][0]
-        result = adapter.count_orphans(schema, table, col, fk["ref_schema"], fk["ref_table"],
-                                        fk["ref_columns"][0], sample_size=sample_size)
-        fk_checks.append({
-            "column": col, "declared": True,
-            "ref_object": f"{fk['ref_schema']}.{fk['ref_table']}", "ref_column": fk["ref_columns"][0],
-            **result,
-        })
+        try:
+            result = adapter.count_orphans(schema, table, col, fk["ref_schema"], fk["ref_table"],
+                                            fk["ref_columns"][0], sample_size=sample_size)
+            fk_checks.append({
+                "column": col, "declared": True,
+                "ref_object": f"{fk['ref_schema']}.{fk['ref_table']}", "ref_column": fk["ref_columns"][0],
+                **result,
+            })
+        except Exception as e:
+            fk_checks.append({
+                "column": col, "declared": True,
+                "ref_object": f"{fk['ref_schema']}.{fk['ref_table']}", "ref_column": fk["ref_columns"][0],
+                "error": str(e),
+            })
     for cfk in (candidate_fks or []):
-        result = adapter.count_orphans(schema, table, cfk["column"], cfk["ref_schema"], cfk["ref_table"],
-                                        cfk["ref_column"], sample_size=sample_size)
-        fk_checks.append({
-            "column": cfk["column"], "declared": False,
-            "ref_object": f"{cfk['ref_schema']}.{cfk['ref_table']}", "ref_column": cfk["ref_column"],
-            **result,
-        })
+        try:
+            result = adapter.count_orphans(schema, table, cfk["column"], cfk["ref_schema"], cfk["ref_table"],
+                                            cfk["ref_column"], sample_size=sample_size)
+            fk_checks.append({
+                "column": cfk["column"], "declared": False,
+                "ref_object": f"{cfk['ref_schema']}.{cfk['ref_table']}", "ref_column": cfk["ref_column"],
+                **result,
+            })
+        except Exception as e:
+            fk_checks.append({
+                "column": cfk["column"], "declared": False,
+                "ref_object": f"{cfk['ref_schema']}.{cfk['ref_table']}", "ref_column": cfk["ref_column"],
+                "error": str(e),
+            })
 
     return {
         "object": f"{schema}.{table}",

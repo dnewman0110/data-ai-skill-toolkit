@@ -6,6 +6,22 @@ README.md "Versioning" for how this relates to per-skill and per-schema versions
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-05
+
+### Fixed
+- `scripts/lakehouse_adapter.py` (`SqlServerAdapter`) and `skills/data-discovery/scripts/profile_object.py`:
+  five bugs found running greenfield profiling against a live Azure SQL Database --
+  `profile_column`/`check_uniqueness` missing a required derived-table alias (T-SQL "Incorrect
+  syntax near ')'"); `MIN`/`MAX` on `bit` and `COUNT(DISTINCT)`/`MIN`/`MAX` on `xml`/`text`/
+  `ntext`/`image`/`geography`/`geometry`/`hierarchyid` (error 8117), now conditionally omitted
+  based on the column's declared type (`sql_variant`/`rowversion`/`timestamp` added to the same
+  exclusion sets speculatively); `count_orphans`'s `SUM(CASE WHEN ... EXISTS(subquery) ...)` shape
+  rejected outright (error 130), rewritten via an inner derived table; every candidate-key/FK
+  check in `profile_table` now runs in its own `try`/`except` so one failing check degrades to a
+  flagged finding instead of aborting the whole profiling run; `numeric_types` was missing
+  `money`/`smallmoney`/`bit`, causing those columns to trip a factually wrong TEXT-vs-numeric
+  mismatch finding. `data-discovery` bumped to `1.2.0`. See DECISIONS.md decision 58.
+
 ## [1.1.0] - 2026-08-05
 
 `1.0.0` was the initial plugin version and never got its own section here, so this section covers

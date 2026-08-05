@@ -743,13 +743,35 @@ class SqlServerAdapter(LakehouseAdapter):
         pages = rows[0]["pages"] if rows and rows[0]["pages"] is not None else 0
         return int(pages) * 8 * 1024  # SQL Server pages are a fixed 8 KiB
 
+    # T-SQL rejects MIN/MAX on `bit`, and rejects COUNT(DISTINCT ...)/MIN/MAX outright on these
+    # large-object/special types (error 8117 either way) -- checked against the declared type
+    # rather than guessed-and-retried, since the exact set is fixed and documented. sql_variant/
+    # rowversion/timestamp are included speculatively (same documented restriction, not yet
+    # reproduced against a live server) -- worst case they return NULL where MIN/MAX would have
+    # actually worked, not a crash.
+    _NO_MIN_MAX_TYPES = {"bit", "rowversion", "timestamp"}
+    _NO_AGGREGATE_TYPES = {"xml", "text", "ntext", "image", "geography", "geometry",
+                            "hierarchyid", "sql_variant"}
+
     def profile_column(self, schema: str, table: str, column: str, sample_size: int | None = None) -> ColumnProfile:
         total = self.row_count(schema, table)
-        src = f"(SELECT TOP ({sample_size}) {column} FROM [{schema}].[{table}])" if sample_size \
+        src = f"(SELECT TOP ({sample_size}) {column} FROM [{schema}].[{table}]) AS s" if sample_size \
             else f"[{schema}].[{table}]"
+        type_rows = self._query(
+            "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+            (schema, table, column),
+        )
+        data_type = type_rows[0]["DATA_TYPE"] if type_rows else None
+        no_aggregate = data_type in self._NO_AGGREGATE_TYPES
+        no_min_max = no_aggregate or data_type in self._NO_MIN_MAX_TYPES
+        distinct_select = "NULL AS distinct_n" if no_aggregate \
+            else f"COUNT(DISTINCT {column}) AS distinct_n"
+        min_max_select = "NULL AS min_v, NULL AS max_v" if no_min_max \
+            else f"MIN({column}) AS min_v, MAX({column}) AS max_v"
         rows = self._query(
             f"SELECT COUNT(*) AS n, SUM(CASE WHEN {column} IS NULL THEN 1 ELSE 0 END) AS nulls, "
-            f"COUNT(DISTINCT {column}) AS distinct_n, MIN({column}) AS min_v, MAX({column}) AS max_v "
+            f"{distinct_select}, {min_max_select} "
             f"FROM {src}"
         )
         r = rows[0]
@@ -778,10 +800,17 @@ class SqlServerAdapter(LakehouseAdapter):
         # NOT EXISTS, not NOT IN -- T-SQL's well-known NOT IN + NULL footgun (if the subquery ever
         # returns any NULL, NOT IN evaluates to UNKNOWN for every row, silently reporting zero
         # orphans regardless of the real answer). NOT EXISTS has no such trap.
+        #
+        # The flag is computed in an inner derived table and SUM'd in an outer query, rather than
+        # SUM(CASE WHEN ... EXISTS(subquery) ... END) directly -- T-SQL (confirmed against a live
+        # Azure SQL DB, compat level 170) rejects that shape outright with error 130 ("Cannot
+        # perform an aggregate function on an expression containing an aggregate or a subquery"),
+        # regardless of EXISTS vs. NOT EXISTS.
         rows = self._query(
-            f"SELECT COUNT(*) AS n, SUM(CASE WHEN t.{column} IS NOT NULL AND NOT EXISTS "
+            f"SELECT SUM(flag) AS orphans, COUNT(*) AS n FROM ("
+            f"SELECT CASE WHEN t.{column} IS NOT NULL AND NOT EXISTS "
             f"(SELECT 1 FROM [{ref_schema}].[{ref_table}] r WHERE r.{ref_column} = t.{column}) "
-            f"THEN 1 ELSE 0 END) AS orphans FROM {src} AS t"
+            f"THEN 1 ELSE 0 END AS flag FROM {src} AS t) AS d"
         )
         r = rows[0]
         checked = r["n"] or 0
@@ -792,7 +821,7 @@ class SqlServerAdapter(LakehouseAdapter):
     def check_uniqueness(self, schema: str, table: str, columns: list[str],
                           sample_size: int | None = None) -> dict:
         cols = ", ".join(columns)
-        src = f"(SELECT TOP ({sample_size}) * FROM [{schema}].[{table}])" if sample_size \
+        src = f"(SELECT TOP ({sample_size}) * FROM [{schema}].[{table}]) AS s" if sample_size \
             else f"[{schema}].[{table}]"
         not_null_clause = " AND ".join(f"{c} IS NOT NULL" for c in columns)
         # Same NULL handling as the other two adapters: rows with a NULL in any key column are

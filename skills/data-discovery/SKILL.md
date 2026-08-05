@@ -13,7 +13,7 @@ description: >-
   output this skill's resolution mode consumes), for generating pipeline code from a contract
   (that's data-pipeline), or for scanning/diffing data already in production (that's data-quality
   and data-validation). This skill never writes to client systems.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # data-discovery

@@ -1070,4 +1070,52 @@ just accepted on the subagent's word.
     built); any database beyond SQL Server (the interface is designed so a future one is a new
     adapter class, not a rewrite, but only SQL Server was asked for).
 
+58. **Five real bugs in `SqlServerAdapter`/`profile_object.py`, found running greenfield profiling
+    against a live Azure SQL Database (AdventureWorksLT, `SalesLT` schema, compat level 170) --
+    decision 57's own "verify against a real instance" caveat playing out exactly as warned.**
+
+    - **Missing derived-table alias** (`profile_column`, `check_uniqueness`): T-SQL requires a
+      correlation name on every derived table in a `FROM` clause; the `(SELECT TOP (n) ...)`
+      sampling subquery in both methods had none (`count_orphans` already got this right). Fixed
+      by appending `AS s` (or aliasing at the join site, matching `count_orphans`' existing
+      `AS t` pattern).
+    - **`MIN`/`MAX` on `bit`, and `COUNT(DISTINCT)`/`MIN`/`MAX` on large-object/special types**
+      (`profile_column`): T-SQL error 8117 on both. Fixed by looking up the column's
+      `INFORMATION_SCHEMA.COLUMNS.DATA_TYPE` and conditionally omitting the unsupported
+      aggregate(s) (`NULL` in their place) for `bit`/`xml`/`text`/`ntext`/`image`/`geography`/
+      `geometry`/`hierarchyid`. `sql_variant`/`rowversion`/`timestamp` added to the same
+      exclusion sets speculatively (same documented restriction, not reproduced live this
+      session) -- worst case they return `NULL` where the aggregate would have actually worked,
+      never a crash.
+    - **`count_orphans`'s `SUM(CASE WHEN ... EXISTS(subquery) ...)` shape rejected outright**
+      (error 130, "Cannot perform an aggregate function on an expression containing an aggregate
+      or a subquery") -- confirmed unconditional (not a legacy-compat-level quirk; current Azure
+      SQL, compat level 170) and identical for `EXISTS` and `NOT EXISTS`. Fixed by computing the
+      `CASE` flag in an inner derived table and `SUM`-ing it in an outer query instead of
+      aggregating directly over the `EXISTS` subquery.
+    - **No per-check isolation** (`profile_object.py::profile_table`): `count_orphans` runs
+      unconditionally for every declared FK with no way to skip it, and a single failing check
+      previously crashed the entire `profile_table` call, discarding every candidate-key/FK
+      result already computed for that table. Every candidate-key and FK/orphan check is now
+      wrapped in its own `try`/`except`, degrading a failure to a `{"error": ...}` finding
+      instead of aborting the run -- deliberately broad (`except Exception`, not a specific
+      driver exception type), since this function is backend-agnostic and doesn't know which
+      adapter it's talking to.
+    - **`numeric_types` missing `money`/`smallmoney`/`bit`** (`profile_object.py::profile_table`):
+      a column declared one of these was treated as "not declared numeric," and because its
+      sampled values parse as floats, produced a factually wrong TEXT/VARCHAR-vs-numeric-mismatch
+      finding that misstated the column's own declared type. Audited `DatabricksConnectAdapter`'s
+      type vocabulary for the same gap -- none found; `numeric_types` matching is substring-based
+      (`t in col.type.lower()`) and `"int"` already being in the set means Spark SQL's
+      `tinyint`/`smallint`/`bigint` all match incidentally.
+
+    All five reproduced identically on any live SQL Server/Azure SQL instance, not specific to
+    this database. Regression coverage added to `skills/data-discovery/evals/run_assertions.py`:
+    mocked-connection shape assertions for the alias and type-conditional-aggregate fixes (same
+    limitation as the rest of this adapter's coverage -- shape only, not a live-server run), plus
+    backend-agnostic `profile_table()` assertions (a duck-typed fake adapter, not a `SqlServerAdapter`
+    mock, since neither the `numeric_types` gap nor the resilience wrapping is backend-specific)
+    for the `money`/`bit` fix and for a failing check degrading to a flagged finding rather than
+    crashing the run.
+
 *(Further decisions will be appended here as later phases proceed.)*

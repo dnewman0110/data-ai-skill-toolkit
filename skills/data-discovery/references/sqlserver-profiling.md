@@ -134,4 +134,9 @@ that *does* exist (`skills/data-discovery/evals/run_assertions.py`) mocks the py
 check generated-SQL shape, not correctness against a real server. Verify against a real (sandbox)
 SQL Server or Azure SQL Database before relying on this in an engagement -- this toolkit's own
 history (`DECISIONS.md` decision 54) is a direct precedent for a doc-accurate adapter still having
-real bugs a live run catches immediately.
+real bugs a live run catches immediately, and decision 58 is exactly that happening to this
+adapter: five real bugs (a missing derived-table alias, `MIN`/`MAX` on unsupported types, an
+aggregate-over-subquery T-SQL rejection in `count_orphans`, a missing-isolation crash on a single
+bad check, and a `numeric_types` gap producing a factually wrong finding) surfaced the first time
+this adapter ran against a live Azure SQL Database, none of which the mocked-connection evals
+caught since they check SQL shape, not a real server's actual acceptance/rejection of that SQL.
