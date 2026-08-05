@@ -6,6 +6,13 @@ README.md "Versioning" for how this relates to per-skill and per-schema versions
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-05
+
+`1.0.0` was the initial plugin version and never got its own section here, so this section covers
+everything from the initial build through 1.1.0. Skills whose behavior actually changed since the
+initial build are bumped to `1.1.0` in their `SKILL.md` frontmatter (`data-discovery`,
+`data-pipeline`); the other three stay at `1.0.0` (doc-only touches).
+
 ### Added
 - Phase 0: `contracts/` -- five versioned JSON Schemas (`run-manifest`, `data-contract`, `model-spec`,
   `quality-report`, `validation-report`), one valid example instance per schema under

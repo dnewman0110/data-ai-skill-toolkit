@@ -15,7 +15,7 @@ description: >-
   specifies. Do NOT use this to check whether a table this skill's own code populated is
   correct -- that's data-quality (single object) or data-validation (source vs. target), run
   after code has actually been deployed and executed by someone else.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # data-pipeline
