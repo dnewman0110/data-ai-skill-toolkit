@@ -1,0 +1,5 @@
+{
+  "source_catalog": "salesforce_source",
+  "source_schema": "crm",
+  "source_table": "opportunity"
+}

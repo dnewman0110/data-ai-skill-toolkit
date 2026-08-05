@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3EVALDPLY0SFORCE0001",
+    "skill": { "name": "data-pipeline", "version": "1.1.0" },
+    "timestamp": "2026-08-05T16:20:00Z",
+    "target": { "platform": "azure", "catalog_type": "unity_catalog", "workspace_id": "adb-example-123456789.12.azuredatabricks.net", "catalog": "acme_retail_dev", "schema": "bronze" },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "not_applicable",
+    "source_fingerprints": [],
+    "telemetry": { "estimated_bytes_scanned": 0, "estimated_rows_scanned": 0, "thresholds_applied": { "max_rows_scanned": null, "max_bytes_scanned": null, "max_wall_clock_seconds": null } },
+    "previous_run_id": null
+  },
+  "pipeline_id": "acme-salesforce-opportunity-bronze-pipeline-v1",
+  "source_refs": {
+    "data_contract_ref": { "contract_id": "acme-salesforce-opportunity-bronze-v1", "schema_version": "1.0.0", "path_or_uri": "skills/data-pipeline/evals/fixtures/salesforce-bronze-contract.json" },
+    "model_spec_ref": null
+  },
+  "modality_decision": {
+    "chosen": "lakeflow_connect",
+    "rubric_factors": {
+      "source_is_managed_connector": true,
+      "requires_streaming": false,
+      "transform_complexity": "simple_declarative",
+      "target_layer": "bronze",
+      "modality_availability": { "pyspark_notebook": true, "declarative_pipeline": true, "lakeflow_connect": true }
+    },
+    "confidence": 0.95,
+    "basis": "Salesforce Opportunity is a Lakeflow Connect managed-connector source landing raw to bronze with no transformation -- source_is_managed_connector true and target_layer bronze route deterministically to lakeflow_connect per references/decision-rubric.md."
+  },
+  "targets": [
+    {
+      "table_name": "bronze_salesforce_opportunity",
+      "target_catalog": "acme_retail_dev",
+      "target_schema": "bronze",
+      "load_pattern": "merge_upsert",
+      "merge_keys": ["opportunity_id"],
+      "generated_files": [
+        { "path": "generated/bronze_salesforce_opportunity/connector_config.yaml", "modality": "lakeflow_connect", "purpose": "connector_config" }
+      ],
+      "transform_spec_ref": "generated/bronze_salesforce_opportunity/transform_spec.json",
+      "tests_carried_forward": [
+        { "source_test": "uniqueness:opportunity_id", "generated_as": "not carried forward -- Lakeflow Connect manages dedup internally" }
+      ]
+    }
+  ],
+  "mock_data": { "generated": false, "location": "", "row_counts_by_table": {} },
+  "idempotency_check": { "performed": false, "method": "not applicable -- Lakeflow Connect manages CDC/incremental sync state internally", "result": "not_applicable", "evidence_ref": null },
+  "readiness_level": "approved_for_deployment",
+  "deployment": {
+    "approved": true,
+    "approved_by": "dave.newman@nimblegravity.com",
+    "target_named": "bronze_salesforce_opportunity",
+    "approval_note": "Approved to move toward bundle resource generation for the Salesforce Opportunity bronze landing.",
+    "approved_at": "2026-08-05T16:30:00Z"
+  },
+  "assumptions": []
+}

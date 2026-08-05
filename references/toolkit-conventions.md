@@ -1,7 +1,8 @@
 # Toolkit Conventions
 
-This file is the single source of truth for rules that apply across all five skills in this toolkit
-(`data-discovery`, `data-modeling`, `data-pipeline`, `data-quality`, `data-validation`). Every skill's
+This file is the single source of truth for rules that apply across all six skills in this toolkit
+(`data-discovery`, `data-modeling`, `data-pipeline`, `data-quality`, `data-validation`,
+`data-deploy`). Every skill's
 SKILL.md links here instead of restating these rules, so they're maintained in one place. If you're
 reading this because a SKILL.md pointed you here: everything below is binding on the skill you're
 running, not optional background reading.
@@ -23,6 +24,12 @@ per engagement -- see `toolkit.example.yaml`.
   deploy, does not create or schedule jobs, does not run generated code against production, and does not
   create or alter catalog objects -- without an explicit, in-conversation human approval that names the
   specific target object or job.
+- `data-deploy` **generates Databricks Asset Bundle resources and writes them to the workspace
+  filesystem**, only for a `pipeline-manifest.json` that already carries that same explicit,
+  in-conversation approval. It does not run `databricks bundle deploy`, does not create a Unity
+  Catalog connection or Lakeflow Connect pipeline, and does not call any Databricks API -- that
+  requires a SECOND, separate, explicit human approval it only records. See
+  `skills/data-deploy/references/approval-gate.md`.
 - Any temp objects a skill needs for computation (e.g. a staging view to compute a hash aggregate) go in
   a **configurable scratch schema** (`scratch_schema` in `toolkit.yaml`), are named with the current
   `run_id`, and are dropped at the end of the run whether it succeeds or fails.
@@ -141,8 +148,12 @@ SKILL.md:
 2. **After a model spec is produced, before it goes to discovery (resolution mode).** Dimensional design
    decisions (grain, SCD type, conformance) are business decisions wearing a technical hat; discovery
    should resolve an approved design, not a draft one.
-3. **Before any pipeline code is deployed or scheduled.** `data-pipeline` writes code to disk; a human (or
-   a separate, explicitly authorized process) takes it from there.
+3. **Before any pipeline code is deployed or scheduled, and again before any bundle resource `data-deploy`
+   generates from it is actually applied.** `data-pipeline` writes code to disk; `data-deploy` writes
+   Asset Bundle resources and connector configuration to disk from an already-approved pipeline
+   manifest. Neither runs, deploys, or schedules anything itself -- a human (or a separate, explicitly
+   authorized process) takes it from there at each step. See
+   `skills/data-deploy/references/approval-gate.md` for why this is two separate approvals, not one.
 4. **After a validation report identifies a discrepancy, before any remediation is applied.** Diagnoses
    and suggested fixes are suggestions. No skill in this toolkit applies a fix to a discrepancy it found.
 
@@ -171,4 +182,5 @@ files to find out what changed.
 - Skill descriptions are mutually exclusive in triggering. Each SKILL.md frontmatter description states
   what the skill is, what it explicitly is **not**, and names the artifact it consumes and the artifact it
   produces. Each SKILL.md body includes a `## When NOT to use this skill` section pointing at its siblings
-  in the chain (modeling -> discovery -> pipeline) and its attached validators (quality, validation).
+  in the chain (modeling -> discovery -> pipeline -> deploy) and its attached validators (quality,
+  validation).

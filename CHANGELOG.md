@@ -6,6 +6,29 @@ README.md "Versioning" for how this relates to per-skill and per-schema versions
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-05
+
+### Added
+- **`data-deploy`, a sixth skill.** Turns a `data-pipeline`-generated `pipeline-manifest.json`
+  whose `modality_decision.chosen` is `lakeflow_connect` and `readiness_level` is
+  `approved_for_deployment` into real Databricks Asset Bundle resources -- a Unity Catalog
+  connection definition (`uc_connection.yml`) and an ingestion-pipeline/destination resource
+  (`ingestion_pipeline.yml`) -- plus a resolved Lakeflow Connect connector type, generic across
+  source systems (SQL Server, Salesforce, ServiceNow, Workday, SharePoint; extensible). Refuses to
+  touch any target not named in the source manifest's `deployment.target_named`, and never runs
+  `databricks bundle deploy`, calls any Databricks API, or creates a live connector itself -- a
+  SEPARATE, explicit human approval (this skill's own `deployment` field, distinct from the source
+  manifest's) is required before that, and even then this skill only records it. New seventh
+  contract schema, `contracts/deployment-manifest.schema.json` (plus its example);
+  `run-manifest.schema.json`'s `skill.name` enum gained `"data-deploy"`; `validate_artifact.py` and
+  `diff_artifact.py` extended accordingly. See DECISIONS.md decision 59.
+
+### Changed
+- `references/toolkit-conventions.md`: read/write boundaries (#1) and human review gates (#7) now
+  cover `data-deploy`'s two-approval-gate boundary; "six skills" throughout (README.md,
+  CONTRIBUTING.md, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`) replacing every
+  "five skills" reference.
+
 ## [1.2.0] - 2026-08-05
 
 ### Fixed

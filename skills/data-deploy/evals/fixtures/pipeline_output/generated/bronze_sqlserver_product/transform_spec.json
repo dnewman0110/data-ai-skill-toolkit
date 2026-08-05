@@ -1,0 +1,5 @@
+{
+  "source_catalog": "AdventureWorksLT",
+  "source_schema": "SalesLT",
+  "source_table": "Product"
+}

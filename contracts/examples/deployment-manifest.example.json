@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3DPLY0SALESFORCE0001",
+    "skill": { "name": "data-deploy", "version": "1.0.0" },
+    "timestamp": "2026-08-05T16:40:00Z",
+    "target": {
+      "platform": "azure",
+      "catalog_type": "unity_catalog",
+      "workspace_id": "adb-example-123456789.12.azuredatabricks.net",
+      "catalog": "acme_retail_dev",
+      "schema": "bronze"
+    },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "not_applicable",
+    "source_fingerprints": [],
+    "telemetry": {
+      "estimated_bytes_scanned": 0,
+      "estimated_rows_scanned": 0,
+      "actual_bytes_scanned": 0,
+      "actual_rows_scanned": 0,
+      "wall_clock_seconds": 0.4,
+      "thresholds_applied": { "max_rows_scanned": 5000000, "max_bytes_scanned": 5368709120, "max_wall_clock_seconds": 900 },
+      "stopped_at_threshold": false
+    },
+    "previous_run_id": null
+  },
+  "deployment_id": "acme-salesforce-opportunity-bronze-pipeline-v1-deploy",
+  "source_pipeline_manifest_ref": {
+    "pipeline_id": "acme-salesforce-opportunity-bronze-pipeline-v1",
+    "schema_version": "1.0.0",
+    "path_or_uri": "~/.toolkit-runs/acme-engagement/01J8Z3P8R4T6M1XN7Q2V9K0YHD/pipeline-manifest.json"
+  },
+  "approval_gate": {
+    "source_target_named": "bronze_salesforce_opportunity",
+    "source_approved_by": "dave.newman@nimblegravity.com",
+    "source_approved_at": "2026-08-05T16:30:00Z"
+  },
+  "targets": [
+    {
+      "table_name": "bronze_salesforce_opportunity",
+      "skipped": false,
+      "skipped_reason": null,
+      "source_system": "salesforce",
+      "connector_type": "SALESFORCE",
+      "connection_name": "acme_salesforce_prod_connection",
+      "source_object": { "schema": "crm", "table": "opportunity" },
+      "destination": { "catalog": "acme_retail_dev", "schema": "bronze", "table": "bronze_salesforce_opportunity" },
+      "merge_keys": ["opportunity_id"],
+      "generated_files": [
+        { "path": "generated/bronze_salesforce_opportunity/uc_connection.yml", "purpose": "uc_connection_definition" },
+        { "path": "generated/bronze_salesforce_opportunity/ingestion_pipeline.yml", "purpose": "ingestion_pipeline_resource" }
+      ]
+    }
+  ],
+  "unsupported_source_systems": [],
+  "readiness_level": "validated",
+  "deployment": null,
+  "assumptions": [
+    {
+      "statement": "acme_salesforce_prod_connection is assumed to already exist (or to be created once, separately, via `databricks connections create` or the Terraform databricks_connection resource) -- this run's ingestion_pipeline.yml references it by name rather than creating it, since a Unity Catalog connection is normally shared across every pipeline sourced from the same Salesforce org, not created per target table.",
+      "basis": "references/asset-bundle-resources.md: Databricks Asset Bundles do not have confirmed first-class native support for creating Unity Catalog connections as of this template's writing; the connection's declarative shape is documented from the Terraform provider's schema and must be verified against the target workspace's actual Databricks CLI/provider version before deployment, same 'verify against live before an engagement' discipline as the rest of this toolkit (see DECISIONS.md decision 58)."
+    }
+  ]
+}

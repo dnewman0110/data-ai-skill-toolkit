@@ -1118,4 +1118,77 @@ just accepted on the subagent's word.
     for the `money`/`bit` fix and for a failing check degrading to a flagged finding rather than
     crashing the run.
 
+59. **New skill: `data-deploy`, the sixth skill in this toolkit -- turns an approved
+    `lakeflow_connect` `pipeline-manifest.json` into real Databricks Asset Bundle resources.**
+    `data-pipeline`'s `lakeflow_connect` modality has always stopped at a `connector_config.yaml`
+    stub with `connector_type` left as a raw `<fill in: e.g. salesforce, sql_server, ...>`
+    placeholder -- correct as far as it went (standing up a real connector is a write to a
+    client's workspace, out of scope for a skill whose own boundary says it never touches client
+    systems), but it left the actual "turn this into something deployable" step entirely manual.
+    `data-deploy` closes that gap without moving the write boundary: it generates a real,
+    parameterized `uc_connection.yml` and `ingestion_pipeline.yml` per target, and never runs
+    `databricks bundle deploy`, calls any Databricks API, or creates a live connector itself.
+
+    **`source_system` is named explicitly by the invoking agent, never parsed from
+    `data-contract.json`'s `source.object`.** It would be convenient to read the source system off
+    the naming convention already visible in `source.object` (`build_transform_spec.py` splits it
+    into `source_catalog.source_schema.source_table`), but that convention is not consistent
+    across systems already in this toolkit: a Salesforce landing's `source.object` is
+    `salesforce_source.crm.opportunity` (the catalog segment is a naming-convention placeholder
+    ending in `_source`), while a SQL-Server-sourced object's is the REAL database name
+    (`AdventureWorksLT.SalesLT.Product`, per `skills/data-discovery/references/sqlserver-profiling.md`),
+    with no marker identifying it as SQL Server at all. String-matching would silently misclassify
+    or fail to classify depending on which convention a given system happens to follow -- exactly
+    the kind of silent inference `toolkit-conventions.md` #6 rules out, and here a wrong guess
+    doesn't just mislabel a finding, it renders a UC connection with the wrong `connection_type`
+    with no loud failure at render time. Per #5 ("classification is judgment, application is
+    deterministic"), `scripts/build_deployment_manifest.py` takes `--source-system` as an explicit
+    flag the agent fills in per `SKILL.md` step 2, and `scripts/resolve_connector_type.py` applies
+    it deterministically, refusing (`unsupported_source_systems`, never a guessed fallback) any
+    name not in its table. See `skills/data-deploy/references/connector-type-mapping.md`.
+
+    **Two separate human approvals, not one, and this skill matches (does not depart from) the
+    toolkit's existing "generate, never deploy" boundary.** Gate A is `data-pipeline`'s own
+    already-recorded approval (`deployment.approved`, `deployment.target_named`) -- `data-deploy`
+    requires it as a precondition to run at all (`scripts/check_target_approval.py` halts
+    immediately otherwise) and refuses to touch any target not named in it (a multi-target
+    manifest's other targets are recorded `skipped: true` with a reason, never silently dropped).
+    Gate B is `deployment-manifest.json`'s own `deployment` field, structurally identical to
+    `pipeline-manifest.json`'s -- a SEPARATE approval licensing actually running `databricks
+    bundle deploy`, which `data-deploy` never sets and never acts on itself. The real design
+    question was whether THIS skill should be the first thing in the toolkit that can execute a
+    live write once Gate B is satisfied. Decided against: every other skill's identity rests on
+    "never touches client systems," this is a public-ish, cross-engagement consultancy tool
+    (`toolkit-conventions.md` #3) where one skill gaining live-deploy capability means every
+    engagement inherits it, and deploy execution depends on auth context/rollback policy/CI
+    conventions that differ per engagement in a way a shared script can't safely generalize --
+    unlike bundle-YAML generation, which is exactly the kind of deterministic, engagement-
+    independent task this toolkit already does well everywhere else. See
+    `skills/data-deploy/references/approval-gate.md` for the full reasoning.
+
+    **The Unity Catalog connection resource is honestly flagged as documented, not asserted as a
+    confirmed native Asset Bundle resource type.** Databricks Asset Bundles' first-class resource
+    types (`pipelines`, `jobs`, `schemas`, etc.) may or may not include a `resources.connections`
+    type as of this skill's writing -- genuinely uncertain, not verified against a live workspace.
+    `uc_connection.yml` is templated from the Terraform provider's `databricks_connection` resource
+    schema instead (stable and well-documented independent of Asset Bundle version), with an
+    explicit comment to create the connection via `databricks connections create` or Terraform and
+    verify the shape before deploying. `ingestion_pipeline.yml`'s `resources.pipelines.*
+    .ingestion_definition` shape is a genuine, higher-confidence Asset Bundle resource. This is the
+    same "documented against public APIs, not verified live -- verify before an engagement"
+    honesty this toolkit already applies to `SqlServerAdapter` (decisions 54 and 58); guessing
+    confidently here would repeat exactly the mistake those decisions exist to avoid.
+
+    **New shared-infrastructure changes**: `contracts/deployment-manifest.schema.json` (seventh
+    contract schema) plus its example; `run-manifest.schema.json`'s `skill.name` enum gained
+    `"data-deploy"`; `scripts/validate_artifact.py` and `scripts/diff_artifact.py` both extended
+    (`diff_deployment_manifest` keys by `table_name`, same as `pipeline-manifest`'s differ).
+    `data-deploy` needs no `toolkit.yaml` config of its own and no lakehouse adapter at all -- it
+    is pure manifest transformation and template rendering, the first skill in this toolkit with
+    that property, which also makes its "never deploys" claim checkable as a static scan for
+    process/network/Databricks-API invocation (stronger and simpler than the other skills'
+    "no DDL/DML" scan). Eval fixtures cover two connector types (Salesforce, SQL Server) end to
+    end, plus every refusal path (wrong modality, not yet approved, `target_named` naming a
+    nonexistent target, an unsupported `source_system`, a multi-target manifest's unnamed targets).
+
 *(Further decisions will be appended here as later phases proceed.)*

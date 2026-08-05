@@ -47,7 +47,7 @@ jobs:
     needs: validate-contracts-and-skills
     strategy:
       matrix:
-        skill: [data-discovery, data-modeling, data-pipeline, data-quality, data-validation]
+        skill: [data-discovery, data-modeling, data-pipeline, data-quality, data-validation, data-deploy]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4

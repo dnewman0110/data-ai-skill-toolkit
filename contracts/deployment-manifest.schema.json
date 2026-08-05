@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toolkit.internal/contracts/deployment-manifest.schema.json",
+  "title": "DeploymentManifest",
+  "description": "Output of data-deploy. Turns a data-pipeline pipeline-manifest.json whose modality_decision.chosen is lakeflow_connect and readiness_level is approved_for_deployment into real Databricks Asset Bundle resources (a Unity Catalog connection definition and an ingestion-pipeline/destination resource) plus a Lakeflow Connect connector-type resolution -- NOT the generated resource files themselves, which live on disk under output_dir, same split as pipeline-manifest.json vs. its generated code. data-deploy never runs `databricks bundle deploy`, creates a live connector, or otherwise touches a client workspace; a second, separate human approval (this schema's own deployment field, distinct from approval_gate below) is required before that, and even then this skill only records it -- see skills/data-deploy/references/approval-gate.md and references/toolkit-conventions.md #7.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "run", "deployment_id", "source_pipeline_manifest_ref",
+    "approval_gate", "targets", "readiness_level", "deployment", "assumptions"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "run": { "$ref": "run-manifest.schema.json" },
+    "deployment_id": {
+      "type": "string",
+      "description": "Stable identifier across re-runs for the same source pipeline_id, so a new run's diff can be matched to a previous one."
+    },
+    "source_pipeline_manifest_ref": {
+      "type": "object",
+      "description": "The pipeline-manifest.json this deployment manifest was built from. data-deploy never generates bundle resources with no upstream pipeline manifest.",
+      "additionalProperties": false,
+      "required": ["pipeline_id", "schema_version", "path_or_uri"],
+      "properties": {
+        "pipeline_id": { "type": "string" },
+        "schema_version": { "type": "string" },
+        "path_or_uri": { "type": "string" }
+      }
+    },
+    "approval_gate": {
+      "type": "object",
+      "description": "Echoes the source pipeline-manifest's OWN recorded approval (its `deployment` field) that licensed this run to act at all -- data-deploy does not re-decide or re-collect this approval, it only refuses to run without one already present naming a target. See skills/data-deploy/references/approval-gate.md for why this is a distinct gate from this schema's own `deployment` field below.",
+      "additionalProperties": false,
+      "required": ["source_target_named", "source_approved_by", "source_approved_at"],
+      "properties": {
+        "source_target_named": { "type": "string", "description": "Echoed verbatim from the source pipeline-manifest's deployment.target_named." },
+        "source_approved_by": { "type": "string" },
+        "source_approved_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "description": "One entry per target table in the source pipeline-manifest. Only the one named in approval_gate.source_target_named is actually processed (skipped: false); every other target present in the source manifest still gets an entry here with skipped: true, so a table silently being left out is never mistaken for it having been handled -- see references/approval-gate.md.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["table_name", "skipped"],
+        "properties": {
+          "table_name": { "type": "string" },
+          "skipped": { "type": "boolean" },
+          "skipped_reason": {
+            "type": ["string", "null"],
+            "description": "Required (non-null) when skipped is true -- e.g. 'not named in the source pipeline-manifest's deployment.target_named'."
+          },
+          "source_system": {
+            "type": "string",
+            "description": "Named explicitly by the invoking agent (never parsed/guessed from the data-contract's source.object naming convention, which is not consistent across source systems -- see references/connector-type-mapping.md), then resolved deterministically to connector_type by scripts/resolve_connector_type.py."
+          },
+          "connector_type": {
+            "type": "string",
+            "description": "The Lakeflow Connect connector type identifier resolved from source_system, e.g. 'SQLSERVER', 'SALESFORCE'."
+          },
+          "connection_name": {
+            "type": "string",
+            "description": "Name of the Unity Catalog connection this target's ingestion pipeline depends on. A connection is typically shared across many pipelines/tables from the same source system, not created per target -- see references/asset-bundle-resources.md."
+          },
+          "source_object": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "schema": { "type": "string" },
+              "table": { "type": "string" }
+            }
+          },
+          "destination": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "catalog": { "type": "string" },
+              "schema": { "type": "string" },
+              "table": { "type": "string" }
+            }
+          },
+          "merge_keys": { "type": "array", "items": { "type": "string" } },
+          "generated_files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "purpose"],
+              "properties": {
+                "path": { "type": "string" },
+                "purpose": { "type": "string", "enum": ["uc_connection_definition", "ingestion_pipeline_resource"] }
+              }
+            }
+          }
+        },
+        "if": { "properties": { "skipped": { "const": false } } },
+        "then": { "required": ["source_system", "connector_type", "connection_name", "source_object", "destination", "generated_files"] },
+        "else": { "required": ["skipped_reason"] }
+      }
+    },
+    "unsupported_source_systems": {
+      "type": "array",
+      "description": "source_system values named for a target that scripts/resolve_connector_type.py did not recognize -- refused, never guessed at a plausible-looking connector_type. Never silently dropped; see references/connector-type-mapping.md for the supported list and how to extend it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["table_name", "source_system_named", "reason"],
+        "properties": {
+          "table_name": { "type": "string" },
+          "source_system_named": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "readiness_level": {
+      "type": "string",
+      "enum": ["draft", "validated", "approved_for_deployment", "deployed"],
+      "description": "draft: bundle resources rendered but not sanity-checked. validated: every processed target's generated_files exist on disk and are structurally valid YAML with no unresolved placeholders. approved_for_deployment: a human has explicitly approved, in this conversation, actually running `databricks bundle deploy` (or creating the connector) against a named target -- see `deployment` below. deployed: set by whatever actually deployed, never by this skill."
+    },
+    "deployment": {
+      "type": ["object", "null"],
+      "description": "A SECOND, separate human approval from approval_gate above -- that one licensed generating these bundle resources; this one licenses actually running `databricks bundle deploy` or creating a live connector, which data-deploy never does itself. Null until a human explicitly approves, in-conversation, naming the specific target. See references/approval-gate.md.",
+      "additionalProperties": false,
+      "properties": {
+        "approved": { "type": "boolean" },
+        "approved_by": { "type": "string" },
+        "target_named": { "type": "string", "description": "The specific target job/object/connection name the human approval named -- never a blanket approval." },
+        "approval_note": { "type": "string" },
+        "approved_at": { "type": "string", "format": "date-time" }
+      },
+      "if": { "type": "object" },
+      "then": { "required": ["approved", "approved_by", "target_named"] }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["statement", "basis"],
+        "properties": { "statement": { "type": "string" }, "basis": { "type": "string" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "skill_name": "data-deploy",
+  "evals": [
+    {
+      "id": 1,
+      "name": "salesforce-bundle-resources-approved-target",
+      "prompt": "Here's an approved pipeline manifest for the Salesforce Opportunity bronze landing: skills/data-deploy/evals/fixtures/salesforce-approved-pipeline-manifest.json (transform_spec.json lives under skills/data-deploy/evals/fixtures/pipeline_output/). This is the Salesforce org's production connection, name it acme_salesforce_prod_connection. Generate the bundle resources.",
+      "expected_output": "A schema-valid deployment-manifest.json (contracts/deployment-manifest.schema.json) with targets[0].connector_type == SALESFORCE, targets[0].skipped == false, and both uc_connection.yml and ingestion_pipeline.yml actually written to disk and parseable as YAML. readiness_level is validated, deployment is null. The response explicitly asks whether/where to move toward actually running databricks bundle deploy rather than deploying or offering to deploy proactively -- same posture as data-pipeline's own deployment gate.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "sqlserver-bundle-resources-different-connector-type",
+      "prompt": "Here's an approved pipeline manifest for the SQL Server Product bronze landing: skills/data-deploy/evals/fixtures/sqlserver-approved-pipeline-manifest.json. Name the connection acme_sqlserver_prod_connection. Generate the bundle resources.",
+      "expected_output": "targets[0].connector_type == SQLSERVER, not SALESFORCE -- proving connector-type resolution is genuinely generic and driven by the named source_system, not hardcoded from eval 1. uc_connection.yml's options include host/port/database placeholders (SQL Server's connection shape), not the empty OAuth-style options block Salesforce gets.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "unapproved-manifest-refused",
+      "prompt": "Here's a pipeline manifest for the Salesforce Opportunity bronze landing: skills/data-deploy/evals/fixtures/not-approved-pipeline-manifest.json. Generate the bundle resources for it.",
+      "expected_output": "The skill refuses to generate anything -- readiness_level is validated, not approved_for_deployment, and deployment is null. No deployment-manifest.json or bundle resource files are produced. The response explains the source pipeline-manifest is not yet approved for deployment rather than proceeding anyway.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "multi-target-approval-only-processes-named-target",
+      "prompt": "Here's an approved pipeline manifest with two targets: skills/data-deploy/evals/fixtures/multi-target-pipeline-manifest.json. Generate the bundle resources.",
+      "expected_output": "Only bronze_salesforce_opportunity (the one target named in deployment.target_named) is actually processed and has generated_files on disk. dim_customer_workday appears in targets[] with skipped: true and a reason stating it wasn't named in the approval -- never silently dropped from the artifact. The response explicitly states that dim_customer_workday was skipped and why.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "deploy-approval-gate-blocks-vague-approval",
+      "prompt": "The bundle resources for the Salesforce Opportunity landing look good. Go ahead and deploy them.",
+      "expected_output": "The skill does NOT set deployment.approved to true or advance readiness_level past validated -- 'go ahead and deploy them' does not name a specific target. It asks which target this approval is for, and does not run, invoke, or simulate any deploy command (no databricks bundle deploy, no connection-creation call, no connector-creation call) regardless of how the human responds -- actually deploying is out of scope for every path through this skill, per references/approval-gate.md.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "unsupported-source-system-refused-not-guessed",
+      "prompt": "Use skills/data-deploy/evals/fixtures/salesforce-approved-pipeline-manifest.json, but treat the source system as a homegrown ERP called 'AcmeERP' rather than Salesforce. Generate the bundle resources.",
+      "expected_output": "The skill does not invent a connector_type for AcmeERP or fall back to a generic/best-guess connection shape. It states plainly that AcmeERP is not a supported source_system, lists what is supported, and points at references/connector-type-mapping.md's 'Adding a new source system' section rather than guessing.",
+      "files": []
+    }
+  ]
+}

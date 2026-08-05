@@ -1,13 +1,15 @@
 # data-ai-skill-toolkit
 
-A reusable toolkit of five Claude skills for Databricks/Unity Catalog data engagements, built as one
-system rather than five independent tools. `data-discovery` is the hub: it either resolves an
+A reusable toolkit of six Claude skills for Databricks/Unity Catalog data engagements, built as one
+system rather than six independent tools. `data-discovery` is the hub: it either resolves an
 *already-designed* dimensional model from `data-modeling` against real objects (**resolution**
 mode -- for a new or extended star schema), or explores directly from prose business intent with
 no prior design at all (**greenfield** mode -- the common case, and where most engagements start).
-Either mode produces a `data-contract.json`, which `data-pipeline` builds code from. Two
+Either mode produces a `data-contract.json`, which `data-pipeline` builds code from. When that code
+is a Lakeflow Connect pipeline and a human has approved it for deployment, `data-deploy` turns it
+into real Databricks Asset Bundle resources -- still never executing a deploy itself. Two
 validators, `data-quality` and `data-validation`, attach at fixed points against that chain's
-outputs. All five read and write a shared set of versioned JSON Schemas under `contracts/`, so the
+outputs. All six read and write a shared set of versioned JSON Schemas under `contracts/`, so the
 handoff between skills is a checkable artifact, not a hope.
 
 ```
@@ -15,10 +17,10 @@ handoff between skills is a checkable artifact, not a hope.
                                no model-spec -- the common case)
                                               |
                                               v
-modeling  --model-spec-->  discovery  --data-contract-->  pipeline
-(optional: formal              |                              |
- star-schema design)     (quality attaches                (validation attaches
-                           to any source/target)             source vs. target)
+modeling  --model-spec-->  discovery  --data-contract-->  pipeline  --pipeline-manifest-->  deploy
+(optional: formal              |                              |            (lakeflow_connect,
+ star-schema design)     (quality attaches                (validation attaches   approved_for_deployment
+                           to any source/target)             source vs. target)  targets only)
 ```
 
 A third path is also viable but only informally: run `data-discovery` greenfield first to learn
@@ -58,8 +60,9 @@ data-ai-skill-toolkit/
 │   ├── data-discovery/
 │   ├── data-pipeline/
 │   ├── data-quality/
-│   └── data-validation/
-│       each: SKILL.md, references/, scripts/, evals/
+│   ├── data-validation/
+│   └── data-deploy/
+│       each: SKILL.md, references/, scripts/, evals/ (data-pipeline and data-deploy also have templates/)
 ├── fixtures/                      synthetic lakehouse (SQLite-based) with deliberate flaws,
 │                                  shared across every skill's evals -- no client data, ever
 ├── scripts/
@@ -89,7 +92,7 @@ correctly treated as a breaking toolkit release and called out loudly in `CHANGE
 This repo is a [Claude Code plugin](https://code.claude.com/docs/en/plugins-reference)
 (`.claude-plugin/plugin.json` at the repo root) with its own `.claude-plugin/marketplace.json`, so it's
 also the marketplace that distributes it -- installing it as a plugin is what actually makes Claude Code
-discover and invoke the five skills from inside a project session, and is enough on its own to start
+discover and invoke the six skills from inside a project session, and is enough on its own to start
 using the toolkit; pinning a copy of the raw files into the repo (below) is a separate, optional concern,
 not a prerequisite.
 
@@ -105,7 +108,7 @@ the working directory -- so the plugin works the same way no matter where it's i
 ```
 
 (Swap the URL for a local filesystem path to test a checkout before pushing it.) Restart Claude Code (or
-run `/reload-skills` / `/reload-plugins`) afterward; the five skills load namespaced as
+run `/reload-skills` / `/reload-plugins`) afterward; the six skills load namespaced as
 `/data-ai-skill-toolkit:data-discovery`, `/data-ai-skill-toolkit:data-modeling`, etc., and Claude also
 triggers them automatically by matching your request against each skill's `description`.
 

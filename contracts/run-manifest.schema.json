@@ -33,7 +33,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "enum": ["data-discovery", "data-modeling", "data-pipeline", "data-quality", "data-validation"]
+          "enum": ["data-discovery", "data-modeling", "data-pipeline", "data-quality", "data-validation", "data-deploy"]
         },
         "version": {
           "type": "string",

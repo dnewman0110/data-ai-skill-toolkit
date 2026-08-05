@@ -58,6 +58,7 @@ SCHEMA_FILENAMES = {
     "validation-report": "validation-report.schema.json",
     "run-manifest": "run-manifest.schema.json",
     "pipeline-manifest": "pipeline-manifest.schema.json",
+    "deployment-manifest": "deployment-manifest.schema.json",
 }
 
 
@@ -79,6 +80,8 @@ def guess_schema_type(artifact_path: Path, artifact: dict) -> str:
         return "validation-report"
     if "modality_decision" in artifact and "readiness_level" in artifact:
         return "pipeline-manifest"
+    if "source_pipeline_manifest_ref" in artifact and "approval_gate" in artifact:
+        return "deployment-manifest"
     if "skill" in artifact and "invoking_identity" in artifact:
         return "run-manifest"
     raise ValueError(

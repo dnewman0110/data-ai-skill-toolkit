@@ -183,11 +183,44 @@ def diff_pipeline_manifest(old: dict, new: dict) -> dict:
     }
 
 
+def diff_deployment_manifest(old: dict, new: dict) -> dict:
+    """Targets are stably named (table_name), like pipeline-manifest's. The two things a team
+    actually wants to know on a re-run: did a target's skipped status change (e.g. the approval
+    now names a different/additional target), and did connector_type or readiness_level regress."""
+    old_targets = _index_by(old.get("targets", []), lambda t: t["table_name"])
+    new_targets = _index_by(new.get("targets", []), lambda t: t["table_name"])
+
+    added = sorted(new_targets.keys() - old_targets.keys())
+    removed = sorted(old_targets.keys() - new_targets.keys())
+    changed = []
+    for name in sorted(old_targets.keys() & new_targets.keys()):
+        o, n = old_targets[name], new_targets[name]
+        target_changes = {}
+        if o.get("skipped") != n.get("skipped"):
+            target_changes["skipped"] = {"old": o.get("skipped"), "new": n.get("skipped")}
+        if o.get("connector_type") != n.get("connector_type"):
+            target_changes["connector_type"] = {"old": o.get("connector_type"), "new": n.get("connector_type")}
+        old_files = sorted(f["path"] for f in o.get("generated_files", []))
+        new_files = sorted(f["path"] for f in n.get("generated_files", []))
+        if old_files != new_files:
+            target_changes["generated_files"] = {"old": old_files, "new": new_files}
+        if target_changes:
+            changed.append({"table_name": name, "changes": target_changes})
+
+    return {
+        "targets": {"added": added, "removed": removed, "changed": changed},
+        "readiness_level": {"old": old.get("readiness_level"), "new": new.get("readiness_level")},
+        "approval_gate.source_target_named": {"old": old.get("approval_gate", {}).get("source_target_named"),
+                                                "new": new.get("approval_gate", {}).get("source_target_named")},
+    }
+
+
 DIFFERS = {
     "data-contract": diff_data_contract,
     "validation-report": diff_validation_report,
     "quality-report": diff_quality_report,
     "pipeline-manifest": diff_pipeline_manifest,
+    "deployment-manifest": diff_deployment_manifest,
 }
 
 

@@ -35,7 +35,7 @@ not as a hand-edited data file.
    field), run the description optimization loop described in the skill-creator skill before merging --
    an under- or over-triggering skill degrades every other skill it might collide with.
 
-3. **Cross-cutting rule changes** (`references/toolkit-conventions.md`) apply to all five skills by
+3. **Cross-cutting rule changes** (`references/toolkit-conventions.md`) apply to all six skills by
    reference. If you change a rule here, check whether any skill's SKILL.md restates (rather than
    references) the old version of that rule and needs a matching edit.
 

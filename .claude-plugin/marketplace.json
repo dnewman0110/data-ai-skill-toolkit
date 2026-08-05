@@ -7,7 +7,7 @@
     {
       "name": "data-ai-skill-toolkit",
       "source": "./",
-      "description": "Five interconnected skills for a Databricks/Unity Catalog data consultancy -- data-discovery, data-modeling, data-pipeline, data-quality, data-validation."
+      "description": "Six interconnected skills for a Databricks/Unity Catalog data consultancy -- data-discovery, data-modeling, data-pipeline, data-quality, data-validation, data-deploy."
     }
   ]
 }
