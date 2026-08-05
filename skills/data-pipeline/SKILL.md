@@ -15,7 +15,7 @@ description: >-
   specifies. Do NOT use this to check whether a table this skill's own code populated is
   correct -- that's data-quality (single object) or data-validation (source vs. target), run
   after code has actually been deployed and executed by someone else.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # data-pipeline
@@ -182,10 +182,15 @@ diffable record the other four get. See `DECISIONS.md`.
 - Checking whether data this skill's generated code produced is actually correct -- that's
   **`data-quality`** (single object) or **`data-validation`** (source vs. target), and only after
   a human has taken the generated code from here to an actual deployment and run.
-- Multi-source joins. `build_transform_spec.py` only supports single-source targets in this
-  version -- a target whose columns come from more than one source object needs hand-authored
-  join logic (`transform_complexity: complex_procedural`, `pyspark_notebook` modality, written by
-  a human starting from this skill's column mapping as a reference, not generated end-to-end).
+- A multi-source join that isn't a plain equality lookup (a range/`BETWEEN` condition, a
+  fan-out-risk one-to-many join, anything needing aggregation to resolve), or a multi-source
+  target whose `data-contract.json` doesn't declare `table.source_joins` at all. Both still need
+  hand-authored join logic (`transform_complexity: complex_procedural`, `pyspark_notebook`
+  modality, written by a human starting from this skill's per-source column mapping as a
+  reference, not generated end-to-end) -- see `references/other-modalities.md`. A genuine
+  many-to-one equality lookup join (a denormalizing dimension join, a header table rolled down to
+  a fact's grain, a dimension surrogate-key lookup) IS generated end-to-end when `source_joins` is
+  declared -- see `references/decision-rubric.md`'s worked example.
 
 ## Reference material
 
@@ -201,4 +206,4 @@ diffable record the other four get. See `DECISIONS.md`.
   gaps in this version, not silently unsupported.
 - `references/idempotency-and-mock-data.md` -- exactly what the local mock-data proof does and does
   not establish, and how mock data is derived from a contract's declared types/nullability/tests.
-- `references/toolkit-conventions.md` -- cross-cutting rules shared by all five skills.
+- `references/toolkit-conventions.md` -- cross-cutting rules shared by all six skills.

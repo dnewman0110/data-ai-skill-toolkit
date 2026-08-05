@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.2.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3EVAL0MULTIJOINDIM001",
+    "skill": { "name": "data-discovery", "version": "1.0.0" },
+    "timestamp": "2026-08-05T12:00:00Z",
+    "target": { "platform": "azure", "catalog_type": "unity_catalog", "workspace_id": "adb-example-123456789.12.azuredatabricks.net", "catalog": "acme_retail_dev", "schema": "silver" },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "not_applicable",
+    "source_fingerprints": [],
+    "telemetry": { "estimated_bytes_scanned": 0, "estimated_rows_scanned": 0, "thresholds_applied": { "max_rows_scanned": null, "max_bytes_scanned": null, "max_wall_clock_seconds": null } },
+    "previous_run_id": null
+  },
+  "contract_id": "acme-dim-product-denormalized-v1",
+  "invocation_mode": "greenfield",
+  "source_model_spec_ref": null,
+  "grain_determination": { "method": "explicit_constraint", "confidence_basis": "product.ProductID is the source system's own primary key." },
+  "tables": [
+    {
+      "name": "dim_product",
+      "target_catalog": "acme_retail_dev",
+      "target_schema": "gold",
+      "grain": { "statement": "One row per product, denormalized with its category, parent category, and model.", "determination": "explicit_constraint", "basis": "silver.wwi.product.ProductID is the source system's own primary key." },
+      "source_joins": {
+        "driving_object": "acme_retail_dev.wwi.product",
+        "driving_alias": "p",
+        "joins": [
+          {
+            "alias": "category",
+            "object": "acme_retail_dev.wwi.product_category",
+            "join_type": "left",
+            "on": [{ "left_alias": "p", "left_column": "CategoryID", "right_column": "CategoryID" }]
+          },
+          {
+            "alias": "parent_category",
+            "object": "acme_retail_dev.wwi.product_category",
+            "join_type": "left",
+            "on": [{ "left_alias": "category", "left_column": "ParentProductCategoryID", "right_column": "CategoryID" }]
+          },
+          {
+            "alias": "model",
+            "object": "acme_retail_dev.wwi.product_model",
+            "join_type": "left",
+            "on": [{ "left_alias": "p", "left_column": "ModelID", "right_column": "ModelID" }]
+          }
+        ]
+      },
+      "columns": [
+        { "name": "product_id", "type": "bigint", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.product", "join_alias": "p", "column": "ProductID", "mapping_type": "explicit_alias" } },
+        { "name": "product_name", "type": "string", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.product", "join_alias": "p", "column": "ProductName", "mapping_type": "explicit_alias" } },
+        { "name": "category_name", "type": "string", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.product_category", "join_alias": "category", "column": "CategoryName", "mapping_type": "explicit_alias" } },
+        { "name": "parent_category_name", "type": "string", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.product_category", "join_alias": "parent_category", "column": "CategoryName", "mapping_type": "explicit_alias" } },
+        { "name": "model_name", "type": "string", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.product_model", "join_alias": "model", "column": "ModelName", "mapping_type": "explicit_alias" } }
+      ],
+      "tests": [
+        { "type": "uniqueness", "column": "product_id", "params": { "columns": ["product_id"] }, "threshold_basis": "explicit_constraint", "severity": "blocking" }
+      ],
+      "sample_records": [],
+      "row_count_estimate": 0
+    }
+  ],
+  "unresolved_requirements": [],
+  "assumptions": [
+    {
+      "statement": "product_category is joined twice (alias 'category' for the product's direct category, alias 'parent_category' via ParentProductCategoryID for a 1-level parent) -- a self-join, disambiguated by giving each occurrence its own source_joins alias rather than the same object appearing under one name with ambiguous provenance.",
+      "basis": "skills/data-modeling/references/kimball-concepts.md 'Multi-source facts and dimensions' -- a snowflaked dimension is denormalized via declared source_joins, not compromised into a single-source design."
+    }
+  ]
+}

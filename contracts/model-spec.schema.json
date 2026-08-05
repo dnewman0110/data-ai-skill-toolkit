@@ -67,6 +67,45 @@
           },
           "dimensions_referenced": { "type": "array", "items": { "type": "string" } },
           "degenerate_dimensions": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["column", "source_system_identifier"], "properties": { "column": { "type": "string" }, "source_system_identifier": { "type": "string" } } } },
+          "source_joins": {
+            "type": ["object", "null"],
+            "description": "Non-null only when this fact's source_to_target_mappings span more than one source object -- e.g. attributes living one grain level up on a header table (1:many rolled down to the fact's own grain) plus a dimension surrogate-key lookup. Same structured, equality-only shape as contracts/data-contract.schema.json's table-level source_joins (kept in sync deliberately -- data-modeling designs this join against real, silver-verified objects; data-discovery's resolution mode then validates and carries it through into the data-contract unchanged, per skills/data-discovery SKILL.md). A join that can't be expressed as an equality condition has no home here -- that's a signal this fact's design itself needs re-thinking (a genuine fan-out risk usually means the grain or the join direction is wrong), not something to route around at the pipeline layer.",
+            "additionalProperties": false,
+            "required": ["driving_object", "driving_alias", "joins"],
+            "properties": {
+              "driving_object": { "type": "string", "description": "catalog.schema.table -- the fact's own grain-defining source object." },
+              "driving_alias": { "type": "string" },
+              "joins": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["alias", "object", "join_type", "on"],
+                  "properties": {
+                    "alias": { "type": "string" },
+                    "object": { "type": "string" },
+                    "join_type": { "type": "string", "enum": ["left", "inner"] },
+                    "on": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["right_column"],
+                        "properties": {
+                          "left_alias": { "type": "string" },
+                          "left_column": { "type": "string" },
+                          "left_expression": { "type": "string", "description": "Same free-text-SQL precedent as source_to_target_mappings[].transformation -- a bare expression, no trailing SQL comment." },
+                          "right_column": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "source_to_target_mappings": {
             "type": "array",
             "items": {
@@ -76,6 +115,7 @@
               "properties": {
                 "target_column": { "type": "string" },
                 "source_object": { "type": "string" },
+                "join_alias": { "type": ["string", "null"], "description": "Which of this fact's source_joins.driving_alias or source_joins.joins[].alias source_object/source_column actually come from. Required (non-null) on every mapping when the fact declares source_joins; null/absent otherwise." },
                 "source_column": { "type": "string" },
                 "transformation": { "type": "string" }
               }
@@ -95,6 +135,45 @@
           "kind": { "type": "string", "enum": ["conformed", "local", "junk", "bridge"] },
           "conformance_group": { "type": ["string", "null"], "description": "Non-null when kind is conformed: the shared identifier used across every fact/star that references this dimension, so it is built once and reused rather than redefined per star." },
           "grain": { "type": "string" },
+          "source_joins": {
+            "type": ["object", "null"],
+            "description": "Non-null only when this dimension's attributes come from more than one source object -- the classic 'denormalize a snowflaked dimension' case (e.g. product + product_category + product_model, category self-joined once more for a parent category). Same structured, equality-only shape as facts[].source_joins/contracts/data-contract.schema.json's table-level source_joins.",
+            "additionalProperties": false,
+            "required": ["driving_object", "driving_alias", "joins"],
+            "properties": {
+              "driving_object": { "type": "string" },
+              "driving_alias": { "type": "string" },
+              "joins": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["alias", "object", "join_type", "on"],
+                  "properties": {
+                    "alias": { "type": "string", "description": "Unique among driving_alias and every other joins[].alias -- lets a self-joined object (e.g. product_category joined once directly and once more via ParentProductCategoryID) appear twice with distinct provenance." },
+                    "object": { "type": "string" },
+                    "join_type": { "type": "string", "enum": ["left", "inner"] },
+                    "on": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["right_column"],
+                        "properties": {
+                          "left_alias": { "type": "string" },
+                          "left_column": { "type": "string" },
+                          "left_expression": { "type": "string" },
+                          "right_column": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "attributes": {
             "type": "array",
             "items": {
@@ -111,6 +190,7 @@
                   "required": ["source_object", "source_column"],
                   "properties": {
                     "source_object": { "type": "string" },
+                    "join_alias": { "type": ["string", "null"], "description": "Which of this dimension's source_joins.driving_alias or source_joins.joins[].alias source_object/source_column actually come from. Required (non-null) when the dimension declares source_joins; null/absent otherwise." },
                     "source_column": { "type": "string" }
                   }
                 }

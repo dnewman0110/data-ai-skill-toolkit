@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.2.0",
+  "run": {
+    "schema_version": "1.0.0",
+    "run_id": "01J8Z3EVAL0MULTIJOINFCT001",
+    "skill": { "name": "data-discovery", "version": "1.0.0" },
+    "timestamp": "2026-08-05T12:00:00Z",
+    "target": { "platform": "azure", "catalog_type": "unity_catalog", "workspace_id": "adb-example-123456789.12.azuredatabricks.net", "catalog": "acme_retail_dev", "schema": "silver" },
+    "invoking_identity": "sp-toolkit-runner@acme-engagement.iam",
+    "mode": "not_applicable",
+    "source_fingerprints": [],
+    "telemetry": { "estimated_bytes_scanned": 0, "estimated_rows_scanned": 0, "thresholds_applied": { "max_rows_scanned": null, "max_bytes_scanned": null, "max_wall_clock_seconds": null } },
+    "previous_run_id": null
+  },
+  "contract_id": "acme-fact-sales-order-line-v1",
+  "invocation_mode": "greenfield",
+  "source_model_spec_ref": null,
+  "grain_determination": { "method": "explicit_constraint", "confidence_basis": "(SalesOrderID, SalesOrderDetailID) is the source system's own composite primary key on the line-item table." },
+  "tables": [
+    {
+      "name": "fact_sales_order_line",
+      "target_catalog": "acme_retail_dev",
+      "target_schema": "gold",
+      "grain": { "statement": "One row per sales order line item.", "determination": "explicit_constraint", "basis": "silver.wwi.sales_order_line.(SalesOrderID, SalesOrderDetailID) is the source system's own composite primary key." },
+      "source_joins": {
+        "driving_object": "acme_retail_dev.wwi.sales_order_line",
+        "driving_alias": "line",
+        "joins": [
+          {
+            "alias": "header",
+            "object": "acme_retail_dev.wwi.sales_order_header",
+            "join_type": "left",
+            "on": [{ "left_alias": "line", "left_column": "SalesOrderID", "right_column": "SalesOrderID" }]
+          },
+          {
+            "alias": "date_dim",
+            "object": "acme_retail_dev.gold.dim_date",
+            "join_type": "left",
+            "on": [{ "left_alias": "header", "left_expression": "CAST(header.OrderDate AS DATE)", "right_column": "calendar_date" }]
+          }
+        ]
+      },
+      "columns": [
+        { "name": "sales_order_id", "type": "bigint", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.sales_order_line", "join_alias": "line", "column": "SalesOrderID", "mapping_type": "explicit_alias" } },
+        { "name": "sales_order_detail_id", "type": "bigint", "nullable": false, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.sales_order_line", "join_alias": "line", "column": "SalesOrderDetailID", "mapping_type": "explicit_alias" } },
+        { "name": "customer_key", "type": "bigint", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.sales_order_header", "join_alias": "header", "column": "CustomerID", "mapping_type": "explicit_alias" } },
+        { "name": "bill_to_address_key", "type": "bigint", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.sales_order_header", "join_alias": "header", "column": "BillToAddressID", "mapping_type": "explicit_alias" } },
+        { "name": "ship_to_address_key", "type": "bigint", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.sales_order_header", "join_alias": "header", "column": "ShipToAddressID", "mapping_type": "explicit_alias" } },
+        { "name": "sales_order_number", "type": "string", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.wwi.sales_order_header", "join_alias": "header", "column": "SalesOrderNumber", "mapping_type": "explicit_alias" } },
+        { "name": "order_date_key", "type": "bigint", "nullable": true, "pii_tag": null, "source": { "object": "acme_retail_dev.gold.dim_date", "join_alias": "date_dim", "column": "date_key", "mapping_type": "explicit_alias" } }
+      ],
+      "tests": [
+        { "type": "uniqueness", "column": "sales_order_id,sales_order_detail_id", "params": { "columns": ["sales_order_id", "sales_order_detail_id"] }, "threshold_basis": "explicit_constraint", "severity": "blocking" }
+      ],
+      "sample_records": [],
+      "row_count_estimate": 0
+    }
+  ],
+  "unresolved_requirements": [],
+  "assumptions": [
+    {
+      "statement": "customer_key, bill_to_address_key, ship_to_address_key, and the degenerate sales_order_number all live on the order-header table, one level up from this fact's own line-item grain -- rolled down via a 1:many join on SalesOrderID (many lines match one header, which is the many-to-one direction that matters for fan-out risk, not the header's own cardinality).",
+      "basis": "skills/data-modeling/references/kimball-concepts.md 'Multi-source facts and dimensions' -- a header-to-line rollup is a plain equality lookup join, not a reason to force these attributes onto a different grain."
+    },
+    {
+      "statement": "order_date_key resolves against dim_date.calendar_date using CAST(header.OrderDate AS DATE) as the join key -- a source_joins.joins[].on[].left_expression, since the source column needs a cast before it matches the dimension's declared date type.",
+      "basis": "Still a plain equality condition once the cast is applied -- one dim_date row can ever match a given calendar date, so there is no fan-out risk despite the expression."
+    }
+  ]
+}

@@ -130,4 +130,4 @@ it -- this skill's job ends at "here's what's wrong and why I think so," the sam
   types, exactly how `status` is computed for each, and what makes a check `not_evaluated`.
 - `references/contract-derived-checks.md` -- the contract-test-to-quality-check type mapping and
   how derived and hand-authored checks merge.
-- `references/toolkit-conventions.md` -- cross-cutting rules shared by all five skills.
+- `references/toolkit-conventions.md` -- cross-cutting rules shared by all six skills.

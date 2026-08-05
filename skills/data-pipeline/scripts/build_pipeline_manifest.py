@@ -42,17 +42,28 @@ def build_pipeline_findings(contract: dict, table_name: str, modality: str,
     except ValueError as e:
         return {"halted": True, "reason": str(e), "targets": None}
 
-    mock_rows = derive_mock_data(table, row_count=mock_row_count, seed=mock_seed,
-                                  extra_source_columns=spec.get("extra_source_columns"))
-    mock_dir = output_dir / "mock_data"
-    mock_dir.mkdir(parents=True, exist_ok=True)
-    # Filename is qualified by TARGET table, not just source table -- mock data content depends on
-    # the target's declared types/nullability/tests (see derive_mock_data.py's docstring), so two
-    # targets sharing one source object (e.g. a fact and a dimension both sourced from
-    # silver.orders) produce DIFFERENT mock content and must not silently overwrite each other's
-    # file, which is what a source-table-only filename did.
-    mock_path = mock_dir / f"{table_name}__{spec['source_schema']}.{spec['source_table']}.json"
-    mock_path.write_text(json.dumps(mock_rows, indent=2))
+    if spec.get("is_multi_source"):
+        # derive_mock_data.py synthesizes ONE flat mock table keyed by bare source column name --
+        # for a multi-source spec that would blend columns from genuinely different real objects
+        # into one misleading row shape (and silently collide on a self-join's repeated column
+        # names, e.g. two aliases both named "CategoryName"). Rather than write a mock artifact
+        # that looks like real per-object fixture data but isn't, skip it entirely -- consistent
+        # with validate_pipeline_locally.py already reporting not_applicable for the same reason.
+        # See references/idempotency-and-mock-data.md.
+        mock_rows = []
+        mock_dir = output_dir / "mock_data"
+    else:
+        mock_rows = derive_mock_data(table, row_count=mock_row_count, seed=mock_seed,
+                                      extra_source_columns=spec.get("extra_source_columns"))
+        mock_dir = output_dir / "mock_data"
+        mock_dir.mkdir(parents=True, exist_ok=True)
+        # Filename is qualified by TARGET table, not just source table -- mock data content depends
+        # on the target's declared types/nullability/tests (see derive_mock_data.py's docstring), so
+        # two targets sharing one source object (e.g. a fact and a dimension both sourced from
+        # silver.orders) produce DIFFERENT mock content and must not silently overwrite each other's
+        # file, which is what a source-table-only filename did.
+        mock_path = mock_dir / f"{table_name}__{spec['source_schema']}.{spec['source_table']}.json"
+        mock_path.write_text(json.dumps(mock_rows, indent=2))
 
     idempotency = validate_pipeline_locally(spec, mock_rows)
     evidence_path = output_dir / "generated" / table_name / "idempotency_evidence.json"
@@ -82,10 +93,14 @@ def build_pipeline_findings(contract: dict, table_name: str, modality: str,
             "tests_carried_forward": codegen["tests_carried_forward"],
         },
         "mock_data": {
-            "generated": True,
-            "location": str(mock_dir),
-            # Keyed by target table too, for the same reason the filename is -- see above.
-            "row_counts_by_table": {f"{table_name} <- {spec['source_schema']}.{spec['source_table']}": len(mock_rows)},
+            "generated": not spec.get("is_multi_source"),
+            "location": str(mock_dir) if not spec.get("is_multi_source") else "",
+            # Keyed by target table too, for the same reason the filename is -- see above. Empty
+            # for a multi-source target -- see the is_multi_source branch above.
+            "row_counts_by_table": (
+                {} if spec.get("is_multi_source")
+                else {f"{table_name} <- {spec['source_schema']}.{spec['source_table']}": len(mock_rows)}
+            ),
         },
         "idempotency_check": {
             "performed": idempotency["performed"],

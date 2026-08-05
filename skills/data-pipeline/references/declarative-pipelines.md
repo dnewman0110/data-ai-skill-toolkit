@@ -53,6 +53,27 @@ generator deliberately does not template-guess. `tests_carried_forward` records 
 carried forward" with the reason, rather than silently dropping it. Run `data-quality` against the
 target after it's deployed and loaded to cover these.
 
+## Multi-source joins
+
+When the contract declares `table.source_joins`, the staging view's `spark.readStream.table(...)`
+call becomes an aliased read of the driving object, `.join()`-chained against every declared
+joined object, `.select(...)`-ed exactly as the single-source case already was (each column
+qualified `F.col("<alias>.<column>")` instead of a bare `F.col("<column>")`).
+
+**Every JOINED (non-driving) object is read via `spark.read.table(...)` -- a static batch
+snapshot -- even though the driving object streams.** This is the standard, documented
+stream-static join pattern: exactly one side of the join is a stream, so Spark Structured
+Streaming needs no watermark and no stream-stream join complexity, which is correct for a genuine
+many-to-one lookup (the joined side is dimension/reference-shaped, not something this pipeline is
+itself ingesting incrementally). It would be the WRONG choice if the looked-up side itself needed
+CDC/incremental behavior -- but that's precisely a fan-out-risk or aggregation shape
+`references/decision-rubric.md` already excludes from `source_joins` and routes to
+`complex_procedural` instead, so it never reaches this rendering path.
+
+The full_refresh variant (`declarative_pipeline_full_refresh.py.tmpl`, no merge keys) has no
+streaming side at all -- driving and joined objects are both `spark.table(...)`/
+`spark.read.table(...)`, no distinction needed.
+
 ## Deployment
 
 Generating these files does not create a pipeline in Databricks. A human (or a separate,

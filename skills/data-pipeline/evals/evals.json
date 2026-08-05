@@ -17,9 +17,9 @@
     },
     {
       "id": 3,
-      "name": "multi-source-join-routes-to-pyspark",
+      "name": "multi-source-join-with-no-declared-join-routes-to-pyspark",
       "prompt": "Here's a data contract for an order-line fact table with amounts converted to USD via an FX rate table: skills/data-pipeline/evals/fixtures/multi-source-join-contract.json. Can you generate the pipeline for fct_orders_usd_normalized?",
-      "expected_output": "The skill recognizes this target joins two source objects (silver.orders and silver.fx_rates), classifies transform_complexity as complex_procedural, and does NOT attempt to force a single-source spec or silently drop the FX rate join. modality_decision.chosen == pyspark_notebook. The response is explicit that the join itself needs to be hand-written, not auto-generated, and points to the per-source column mappings as a starting reference rather than presenting broken or incomplete generated code as done.",
+      "expected_output": "The skill recognizes this target joins two source objects (silver.orders and silver.fx_rates) with no table.source_joins declared -- as of this toolkit version, a multi-source target CAN be generated automatically (see evals 10-11), but only when source_joins declares the actual join condition; this contract doesn't, so build_transform_spec.py correctly refuses rather than guessing what silver.orders and silver.fx_rates actually join on. Classifies transform_complexity as complex_procedural and does NOT attempt to force a single-source spec, silently drop the FX rate join, or invent a plausible-looking join condition. modality_decision.chosen == pyspark_notebook. The response is explicit that the join condition itself needs to be declared (via source_joins, if it's a genuine equality lookup) or hand-written (if it's genuinely more complex), and points to the per-source column mappings as a starting reference rather than presenting broken or incomplete generated code as done.",
       "files": []
     },
     {
@@ -62,6 +62,20 @@
       "name": "scd-type-2-rendered-for-declarative-pipeline-only",
       "prompt": "Here's a data contract for a customer dimension where region is tracked as SCD Type 2: skills/data-pipeline/evals/fixtures/scd2-dimension-contract.json. Generate the pipeline for dim_customer.",
       "expected_output": "For declarative_pipeline modality: the generated dlt.apply_changes call has stored_as_scd_type=2 and track_history_column_list=[\"region\"] -- real Type-2 history, not the previous hardcoded stored_as_scd_type=1. customer_id and customer_name are unaffected. If asked to also generate (or if the rubric would otherwise choose) pyspark_notebook for this same target, the response does NOT silently render a Type-1-only MERGE as if it satisfied the scd_type: 2 requirement -- pipeline_findings_<table>.json's scd2_unsupported_notes flags region, and the response says so explicitly rather than claiming full support.",
+      "files": []
+    },
+    {
+      "id": 10,
+      "name": "multi-source-denormalizing-dimension-with-self-join",
+      "prompt": "Here's a data contract for a denormalized product dimension -- it joins product, product_category (twice: once directly, once more via ParentProductCategoryID for a 1-level parent category), and product_model: skills/data-pipeline/evals/fixtures/denormalizing-dimension-join-contract.json. Generate the pipeline for dim_product.",
+      "expected_output": "The skill recognizes this as a genuine many-to-one lookup join across three source objects (product_category appearing twice via two distinct source_joins aliases for the self-join) and classifies transform_complexity as simple_declarative, NOT complex_procedural -- modality_decision.chosen is declarative_pipeline, not pyspark_notebook. The generated code renders a real multi-table join (product LEFT JOIN product_category AS category ... LEFT JOIN product_category AS parent_category ...), with category_name and parent_category_name correctly qualified to their own alias, never colliding or silently dropping one occurrence. idempotency_check.result is not_applicable (the local proof does not yet synthesize multi-table mock data), and the response explains this is a documented v1 scope limit of the LOCAL proof, not evidence the generated Spark code is wrong -- readiness_level still reaches validated.",
+      "files": []
+    },
+    {
+      "id": 11,
+      "name": "multi-source-header-rollup-and-expression-based-dimension-lookup",
+      "prompt": "Here's a data contract for a sales order line fact whose customer/address/order-number attributes live one level up on the order header, plus a date dimension lookup: skills/data-pipeline/evals/fixtures/header-rollup-dimension-lookup-contract.json. Generate the pipeline for fact_sales_order_line.",
+      "expected_output": "The skill recognizes both joins (line-to-header, a 1:many rollup that's many-to-one from the LINE's own grain perspective; and header-to-dim_date, an equality lookup keyed on a cast expression rather than a bare column) as genuine lookup joins with no fan-out risk, and classifies transform_complexity as simple_declarative -- modality_decision.chosen is declarative_pipeline. The generated code resolves order_date_key via a real CAST(header.OrderDate AS DATE) join condition against dim_date.calendar_date, not a bare column equality. merge_keys is the fact's own composite grain (sales_order_id, sales_order_detail_id), unaffected by the header/dimension joins. The response explicitly surfaces that the local idempotency proof is not_applicable for this multi-source target and explains why, rather than a generic success claim.",
       "files": []
     }
   ]

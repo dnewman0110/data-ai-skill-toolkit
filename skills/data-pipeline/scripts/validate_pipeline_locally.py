@@ -76,6 +76,29 @@ def _apply_merge(conn: sqlite3.Connection, spec: dict, run_label: str) -> None:
 
 
 def validate_pipeline_locally(spec: dict, mock_rows: list[dict]) -> dict:
+    if spec.get("is_multi_source"):
+        # v1 scope decision, not a silent gap: derive_mock_data.py synthesizes one flat mock table
+        # per TARGET, keyed by bare source column name -- it has no notion of multiple mock source
+        # tables sharing real foreign-key relationships across aliases, which a multi-source join's
+        # local proof would need to be meaningful (mock data that doesn't actually share join keys
+        # would "prove" idempotency by joining everything to NULL, which proves nothing). Rendering
+        # and real code generation both fully support multi-source specs (build_transform_spec.py,
+        # generate_pipeline_code.py) -- only this local SQLite-based proof does not yet. See
+        # references/idempotency-and-mock-data.md and references/other-modalities.md.
+        return {
+            "performed": False,
+            "method": "Not performed: this spec joins multiple source objects "
+                      f"({', '.join(sorted({s['alias'] or s['table'] for s in spec['sources']}))}). "
+                      "The local idempotency proof does not yet synthesize multi-table mock data "
+                      "with matching join keys across separate mock tables -- see "
+                      "references/idempotency-and-mock-data.md. This is a documented v1 scope "
+                      "limit of the LOCAL proof only; the real generated Spark code renders the "
+                      "full multi-table join and is unaffected.",
+            "result": "not_applicable",
+            "evidence": {"row_count_after_run_1": None, "row_count_after_run_2": None,
+                         "hash_after_run_1": None, "hash_after_run_2": None},
+        }
+
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     # toolkit_hash backs render_select_sql's placeholder hash expression for target_transform

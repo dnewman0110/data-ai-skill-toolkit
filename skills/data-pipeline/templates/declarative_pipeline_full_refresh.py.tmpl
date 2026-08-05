@@ -16,6 +16,8 @@ from pyspark.sql import functions as F
 
 @dlt.table(name="$target_table")
 def $target_table():
-    return spark.read.table("$source_catalog.$source_schema.$source_table").select(
+    return (
+        $source_read_expr
+    ).select(
 $select_lines
     )

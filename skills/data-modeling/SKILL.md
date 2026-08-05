@@ -14,7 +14,7 @@ description: >-
   which this skill's output feeds) or to generate pipeline code (that's data-pipeline, which
   consumes a data-contract, never a model-spec directly). Do NOT use this to check whether
   existing gold-layer data is correct (that's data-quality/data-validation).
-version: 1.0.0
+version: 1.1.0
 ---
 
 # data-modeling
@@ -79,6 +79,12 @@ and discovery should resolve an *approved* design, not a draft one.
    type answers -- see `references/kimball-concepts.md`), grounded in the measure's declared type
    from the findings (e.g. a measure declared `TEXT` needs a documented cast in its
    `source_to_target_mappings.transformation`, not a silent assumption it's already numeric).
+   **If this fact's attributes genuinely come from more than one silver object** (e.g. a header
+   table's attributes rolled 1:many down to the fact's own line-item grain, plus a dimension
+   surrogate-key lookup), design the correct grain and mappings first, then declare
+   `facts[].source_joins` -- don't compromise the grain or drop attributes just because a single
+   source object would be simpler to specify. See `references/kimball-concepts.md`'s "Multi-source
+   facts and dimensions" section for the equality-only join shape this needs and why.
 
 4. **For each dimension**, review `scd_candidates` (sibling history-table evidence) before setting
    `scd_type`/`scd_rationale` per attribute -- see `references/scd-type-selection.md`. Review
@@ -86,7 +92,9 @@ and discovery should resolve an *approved* design, not a draft one.
    `conformance_group` versus designing a new `local` dimension -- see
    `references/conformed-dimensions.md`. Identify degenerate dimensions (operational identifiers
    that belong on the fact itself, not a separate table) and junk/bridge dimensions per the same
-   reference.
+   reference. **A denormalized/snowflaked dimension** (product + product category + product
+   model, a category self-joined once more for a parent category, etc.) declares
+   `dimensions[].source_joins` the same way -- see `references/kimball-concepts.md`.
 
 5. **Assemble `model-spec.json`** matching `contracts/model-spec.schema.json`, then validate:
    ```
@@ -131,4 +139,4 @@ and discovery should resolve an *approved* design, not a draft one.
 - `references/scd-type-selection.md` -- SCD 0/1/2/3 decision guide and how history-table evidence
   feeds in.
 - `references/conformed-dimensions.md` -- how conformance candidates are surfaced and confirmed.
-- `references/toolkit-conventions.md` -- cross-cutting rules shared by all five skills.
+- `references/toolkit-conventions.md` -- cross-cutting rules shared by all six skills.

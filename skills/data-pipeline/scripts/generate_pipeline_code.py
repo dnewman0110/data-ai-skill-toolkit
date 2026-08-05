@@ -23,6 +23,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
 def _select_lines(spec: dict) -> str:
+    is_multi = spec.get("is_multi_source")
     lines = []
     for c in spec["columns"]:
         # A non-null "transformation" (contract's source.transformation, e.g.
@@ -31,14 +32,55 @@ def _select_lines(spec: dict) -> str:
         # string (LLM/human-authored, untrusted-ish) can never break out of the F.expr(...) call no
         # matter what it contains. The SQL text itself still runs through Spark's own parser, same
         # trust boundary this toolkit already accepts for everything a human reviews before deploy.
+        # A multi-source transformation is expected to already alias-qualify any column it
+        # references itself (e.g. "CAST(header.OrderDate AS DATE)") -- this function has no way to
+        # rewrite an arbitrary SQL expression's identifiers, so it passes it through verbatim
+        # either way, same trust boundary as the single-source case.
         if c.get("transformation"):
             base = f'F.expr({json.dumps(c["transformation"])})'
         else:
-            base = f'F.col("{c["source_column"]}")'
+            col_ref = f'{c["join_alias"]}.{c["source_column"]}' if is_multi and c.get("join_alias") else c["source_column"]
+            base = f'F.col("{col_ref}")'
         if c.get("target_transform") == "hash":
             base = f'F.sha2({base}.cast("string"), 256)'
         lines.append(f'    {base}.alias("{c["target"]}")')
     return ",\n".join(lines)
+
+
+def _join_condition_expr(cond: dict, right_alias: str) -> str:
+    if cond.get("left_expression"):
+        left = f'F.expr({json.dumps(cond["left_expression"])})'
+    else:
+        left = f'F.col("{cond["left_alias"]}.{cond["left_column"]}")'
+    right = f'F.col("{right_alias}.{cond["right_column"]}")'
+    return f'({left} == {right})'
+
+
+def _source_read_expr(spec: dict, driving_streaming: bool) -> str:
+    """The DataFrame expression a template reads from, before .select(...). Single-source: exactly
+    today's bare spark.table(...)/spark.readStream.table(...) call. Multi-source: the driving
+    object (streamed when driving_streaming, e.g. the merge_upsert declarative_pipeline staging
+    view) .alias()'d and chained with one real .join(...) per declared source_joins entry.
+
+    Every JOINED (non-driving) object is always read via spark.read.table(...) -- a static batch
+    snapshot -- even when the driving side streams. This is the standard, documented
+    stream-static join pattern for a many-to-one lookup (no watermark required, unlike a
+    stream-stream join) and is exactly the shape a genuine lookup/denormalizing join needs; see
+    references/declarative-pipelines.md. A join that needed the LOOKED-UP side to itself be
+    incremental/CDC-aware would be a different, fan-out-risk shape this toolkit deliberately
+    doesn't render -- see references/decision-rubric.md."""
+    driving = spec["sources"][0]
+    driving_ref = f'{driving["catalog"]}.{driving["schema"]}.{driving["table"]}'
+    reader = "spark.readStream.table" if driving_streaming else "spark.table"
+    if not spec.get("is_multi_source"):
+        return f'{reader}("{driving_ref}")'
+
+    lines = [f'{reader}("{driving_ref}").alias("{driving["alias"]}")']
+    for j in spec["joins"]:
+        join_ref = f'{j["catalog"]}.{j["schema"]}.{j["table"]}'
+        conditions = " & ".join(_join_condition_expr(c, j["alias"]) for c in j["on"])
+        lines.append(f'    .join(spark.read.table("{join_ref}").alias("{j["alias"]}"), {conditions}, "{j["join_type"]}")')
+    return "\n".join(lines)
 
 
 def _pii_transform_notes(spec: dict, modality: str) -> list[dict]:
@@ -134,6 +176,11 @@ def generate_pipeline_code(spec: dict, modality: str, output_dir: Path) -> dict:
     merge_keys_pylist = json.dumps(spec["merge_keys"])
     merge_keys_csv = ", ".join(spec["merge_keys"]) if spec["merge_keys"] else "(none -- full_refresh)"
     select_lines = _select_lines(spec)
+    # Only declarative_pipeline's merge_upsert staging view reads the driving object as a stream
+    # (dlt.apply_changes' source); every other template/branch reads it as a plain batch table --
+    # see _source_read_expr's docstring for why every JOINED object is always batch regardless.
+    driving_streaming = modality == "declarative_pipeline" and bool(spec["merge_keys"])
+    source_read_expr = _source_read_expr(spec, driving_streaming=driving_streaming)
     expectation_lines, tests_carried_forward = _expectation_lines(spec)
     pii_transform_notes = _pii_transform_notes(spec, modality)
     scd2_notes = _scd2_unsupported_notes(spec, modality)
@@ -153,6 +200,7 @@ def generate_pipeline_code(spec: dict, modality: str, output_dir: Path) -> dict:
         "source_catalog": spec["source_catalog"],
         "source_schema": spec["source_schema"],
         "source_table": spec["source_table"],
+        "source_read_expr": source_read_expr,
         "load_pattern": spec["load_pattern"],
         "merge_keys_pylist": merge_keys_pylist,
         "merge_keys_csv": merge_keys_csv,

@@ -14,7 +14,9 @@ from pyspark.sql import functions as F
 
 @dlt.view(name="${target_table}_staging")
 def ${target_table}_staging():
-    return spark.readStream.table("$source_catalog.$source_schema.$source_table").select(
+    return (
+        $source_read_expr
+    ).select(
 $select_lines
     )
 

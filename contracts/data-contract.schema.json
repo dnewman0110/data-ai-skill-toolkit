@@ -141,6 +141,68 @@
               }
             }
           },
+          "source_joins": {
+            "type": ["object", "null"],
+            "description": "Non-null only when this table's columns are sourced from more than one source object. Declares exactly how those objects join, as a structured, equality-only condition set -- never a raw boolean SQL expression -- so `data-pipeline`'s `build_transform_spec.py` can render a real multi-table SELECT for a genuine many-to-one lookup join (a denormalizing dimension join, a header-to-line rollup, a dimension surrogate-key lookup) without guessing at a join it was never told. A target with columns from multiple source objects and a null/absent source_joins is refused by build_transform_spec.py, not silently single-sourced -- see skills/data-pipeline/references/other-modalities.md. A join that can't be expressed as an equality condition (a range join, a fan-out-risk one-to-many, anything needing aggregation) has no home in this field at all, by design -- that is exactly the signal transform_complexity: complex_procedural should key off, per skills/data-pipeline/references/decision-rubric.md.",
+            "additionalProperties": false,
+            "required": ["driving_object", "driving_alias", "joins"],
+            "properties": {
+              "driving_object": {
+                "type": "string",
+                "description": "catalog.schema.table -- the grain-defining source object. Matches the source.object of every column whose source.join_alias equals driving_alias."
+              },
+              "driving_alias": { "type": "string" },
+              "joins": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["alias", "object", "join_type", "on"],
+                  "properties": {
+                    "alias": {
+                      "type": "string",
+                      "description": "Unique among driving_alias and every other joins[].alias in this table -- lets the same object (e.g. a self-joined lookup table) appear more than once with distinct column provenance."
+                    },
+                    "object": { "type": "string", "description": "catalog.schema.table." },
+                    "join_type": {
+                      "type": "string",
+                      "enum": ["left", "inner"],
+                      "description": "left: preserves every driving-side row even with no match (the common lookup-join case). inner: drops unmatched rows -- use only when a human/discovery has confirmed every driving row is expected to match."
+                    },
+                    "on": {
+                      "type": "array",
+                      "minItems": 1,
+                      "description": "AND-ed equality conditions. Composite-key joins declare more than one item.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["right_column"],
+                        "properties": {
+                          "left_alias": {
+                            "type": "string",
+                            "description": "driving_alias or an earlier-declared joins[].alias this condition's left side reads from. Required unless left_expression is given and is unambiguous about which alias(es) it reads."
+                          },
+                          "left_column": {
+                            "type": "string",
+                            "description": "Exactly one of left_column/left_expression must be present."
+                          },
+                          "left_expression": {
+                            "type": "string",
+                            "description": "A bare SQL expression over already-declared aliases' columns (e.g. 'CAST(header.OrderDate AS DATE)') for a join key that needs a cast/derivation, not a plain column -- same free-text-SQL precedent as columns[].source.transformation. Exactly one of left_column/left_expression must be present. No trailing SQL comment, same rule as source.transformation (kimball-concepts.md)."
+                          },
+                          "right_column": {
+                            "type": "string",
+                            "description": "A column on THIS join's own object (never another alias's) -- the side being newly introduced."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "columns": {
             "type": "array",
             "items": {
@@ -188,6 +250,10 @@
                   "properties": {
                     "object": {
                       "type": "string"
+                    },
+                    "join_alias": {
+                      "type": ["string", "null"],
+                      "description": "Which of the table's source_joins.driving_alias or source_joins.joins[].alias this column actually comes from. Required (non-null) on every column of a table that declares source_joins; must be null/absent on a table that doesn't -- single-source tables need no alias at all."
                     },
                     "column": {
                       "type": "string"

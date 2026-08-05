@@ -13,7 +13,7 @@ description: >-
   output this skill's resolution mode consumes), for generating pipeline code from a contract
   (that's data-pipeline), or for scanning/diffing data already in production (that's data-quality
   and data-validation). This skill never writes to client systems.
-version: 1.2.0
+version: 1.3.0
 ---
 
 # data-discovery
@@ -125,6 +125,15 @@ Full detail, including how to tell which mode you're in and what "narrow" means 
      single name -- `source.transformation` is exactly the field for this; `data-pipeline` renders
      it verbatim and does not re-derive it. Likewise carry a resolved dimension attribute's
      `scd_type` through into the column's `scd_type`.
+   - **Carry `facts[].source_joins`/`dimensions[].source_joins` through into `table.source_joins`
+     verbatim** (resolution mode), and each mapping's `join_alias` through into the matching
+     column's `source.join_alias` -- `data-modeling` already designed this join against real,
+     silver-verified objects; discovery resolves whether the declared objects/columns actually
+     exist (same as any other mapping) but does not re-decide the join itself. If a `source_joins`
+     object/column named in it can't be resolved against a real profiled object, that's an
+     `unresolved_requirements[]` entry like any other unresolved mapping, not a silent drop or a
+     substituted guess at what it should have been. See
+     `skills/data-pipeline/references/other-modalities.md` for what this field enables downstream.
    - **Set `source.source_type` from the findings' `declared_type`, in both modes.** This is
      already-measured data (`profile_object.py` computed it; you're not inferring anything) --
      it's what lets `data-pipeline` catch a declared target type that doesn't actually match the
@@ -187,7 +196,7 @@ Full detail, including how to tell which mode you're in and what "narrow" means 
 - `references/sqlserver-profiling.md` -- profiling a SQL Server source before it's ingested:
   `external_sources.sqlserver` auth-mode setup, T-SQL/metadata differences worth knowing, the
   `source.object` naming convention for a pre-ingestion contract, and what happens next.
-- `references/toolkit-conventions.md` -- cross-cutting rules shared by all five skills (read/write
+- `references/toolkit-conventions.md` -- cross-cutting rules shared by all six skills (read/write
   boundaries, secrets, client data isolation, cost gates, the deterministic/LLM boundary, human
   review gates, idempotency). Read this if you haven't already; it's referenced above throughout
   rather than restated.

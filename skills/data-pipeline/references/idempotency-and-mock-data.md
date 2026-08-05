@@ -35,6 +35,24 @@ parsed/compiled cleanly -- it is a real, evidence-backed gate, just a narrower o
 safe to deploy." The human review gate before deployment (`toolkit-conventions.md` #7 gate 3)
 exists precisely because this evidence, while genuine, is not sufficient on its own.
 
+## Multi-source targets: `not_applicable`, not attempted
+
+A target whose `data-contract.json` declares `table.source_joins` (see
+`references/other-modalities.md`) gets `idempotency_check.result: not_applicable`, same treatment
+as `lakeflow_connect`. This is a deliberate v1 scope decision, not a silent gap: `derive_mock_data.py`
+synthesizes ONE flat mock table per target, keyed by bare source column name, with no notion of
+multiple mock source tables that actually share real foreign-key relationships across aliases. A
+join-based local proof against mock data that doesn't genuinely share join keys would either crash
+(SQLite has no cross-table join keys to match) or trivially "prove" idempotency by joining
+everything to NULL -- neither is real evidence, and reporting `match` anyway would be exactly the
+kind of confidently-wrong artifact this toolkit's own rules forbid. `mock_data.generated` is
+correspondingly `false` for these targets (see `build_pipeline_manifest.py`) rather than writing a
+mock-data file that blends columns from genuinely different real objects into one misleading row
+shape. The REAL generated Spark/Declarative Pipeline code still renders the full multi-table join
+correctly (`build_transform_spec.py`/`generate_pipeline_code.py` fully support it) -- only this
+LOCAL, SQLite-based proof doesn't cover it yet. `not_applicable` does not cap `readiness_level`
+below `validated`, same as `lakeflow_connect`.
+
 ## How mock data is derived
 
 `derive_mock_data.py` reads ONLY a `data-contract.json` table's declared columns

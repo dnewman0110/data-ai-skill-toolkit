@@ -33,15 +33,59 @@ happens to be Delta (every table in this environment is Delta; that's not a stre
 ### `transform_complexity`
 
 - `simple_declarative`: the target's `data-contract.json` columns are all straightforward mappings
-  (rename, cast, simple expression) from a SINGLE source object, and its tests are the kind
+  (rename, cast, simple expression) from a SINGLE source object, OR from MULTIPLE source objects
+  joined via an explicit `table.source_joins` declaration where every join is a plain
+  equality-condition lookup (many-to-one from the driving/grain object's perspective -- a
+  denormalizing dimension join, a header table rolled 1:many down to a fact's own grain, a
+  dimension surrogate-key lookup), with no aggregation and no fan-out risk. Its tests are the kind
   `data-quality`/Declarative Pipeline expectations already express (nullability, uniqueness,
-  range, referential). This is the common case for medallion silver->gold reshaping.
-- `complex_procedural`: the target needs multi-source joins, external API calls mid-pipeline,
-  row-level branching that isn't expressible as a CASE expression, iterative/stateful logic, or a
-  a business rule that genuinely needs imperative code to express correctly. If
-  `build_transform_spec.py` refuses (multi-source), that alone is enough to classify this as
-  `complex_procedural` -- don't try to force a single-source spec by picking one source and
-  dropping the rest.
+  range, referential). This is the common case for medallion silver->gold reshaping, and -- as of
+  the multi-source join support added to `build_transform_spec.py` -- covers most "denormalize a
+  snowflaked dimension" and "roll header attributes down to line-item grain" fact/dimension shapes
+  too. See "Worked example: denormalizing lookup join vs. genuine multi-source complexity" below.
+- `complex_procedural`: the target needs a join that ISN'T a plain equality lookup (a range/
+  `BETWEEN` condition, a one-to-many join on the "wrong" side that would duplicate driving rows, a
+  join needing aggregation to resolve), external API calls mid-pipeline, row-level branching that
+  isn't expressible as a CASE expression, iterative/stateful logic, or a business rule that
+  genuinely needs imperative code to express correctly. If `build_transform_spec.py` refuses
+  (multi-source columns with no `source_joins` declaration, or a join that can't be expressed as
+  the structured equality-only shape `source_joins` supports at all), that alone is enough to
+  classify this as `complex_procedural` -- don't try to force a spec by picking one source and
+  dropping the rest, and don't try to smuggle a non-equality condition into `source_joins` (the
+  schema has no field for one; that absence is deliberate, not an oversight).
+
+#### Worked example: denormalizing lookup join vs. genuine multi-source complexity
+
+**Still `simple_declarative`** -- `dim_product` denormalizes `product` (driving), `product_category`
+(joined twice: once directly on `CategoryID`, once more via `ParentProductCategoryID` for a
+1-level parent category -- a self-join, disambiguated by giving each occurrence its own
+`source_joins.joins[].alias`), and `product_model`. Every join is `LEFT JOIN ... ON <fk> = <pk>`,
+many-to-one from `product`'s perspective -- exactly one `product_category`/`product_model` row can
+ever match a given `product` row, so there is no fan-out risk and nothing to aggregate.
+`source_is_managed_connector` is false (already-in-the-lakehouse silver), `target_layer` is gold,
+`transform_complexity` is `simple_declarative` -> `declarative_pipeline`, same as any other
+gold-layer reshape.
+
+**Still `simple_declarative`, a different shape** -- `fact_sales_order_line`'s grain is
+`(SalesOrderID, SalesOrderDetailID)` (the line-item table, driving), but `customer_key`,
+`bill_to_address_key`, and the degenerate `sales_order_number` live one level up on the
+order-header table, joined `1:many` down to the line grain on `SalesOrderID` (many line rows match
+one header row -- many-to-one from the LINE's perspective, the direction that matters for fan-out
+risk, not the header's). A third join resolves `order_date_key` against `dim_date.calendar_date`
+using `CAST(header.OrderDate AS DATE)` as the join key (a `source_joins.joins[].on[].left_expression`,
+not a bare column) -- still a plain equality condition once the cast is applied, still
+many-to-one. Still `simple_declarative`.
+
+**Now `complex_procedural`** -- the same `fact_sales_order_line`, but a hypothetical
+`current_promotion_key` needs to look up `dim_promotion` on `promo.start_date <= header.OrderDate
+AND promo.end_date >= header.OrderDate` (a range condition, not an equality) -- `source_joins` has
+no field for this, `build_transform_spec.py` cannot render it, and forcing an approximate equality
+join (e.g. matching only `start_date`) would silently produce wrong promotion attribution on any
+order that doesn't fall exactly on a promotion's start date. Also `complex_procedural`: a
+`fact_order_summary` that aggregates `sales_order_line` up to `SalesOrderID` grain before joining
+to header (a GROUP BY has no home in `source_joins`, which only expresses row-preserving lookups)
+-- correctly routes to `pyspark_notebook`, hand-authored, with the per-source column mappings
+`build_transform_spec.py` can still surface (rerun it per source object) as a reference.
 
 ### `target_layer`
 

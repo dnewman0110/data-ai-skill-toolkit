@@ -30,12 +30,12 @@
     },
     {
       "eval_id": 3,
-      "eval_name": "multi-source-join-routes-to-pyspark",
+      "eval_name": "multi-source-join-with-no-declared-join-routes-to-pyspark",
       "prompt": "Here's a data contract for an order-line fact table with amounts converted to USD via an FX rate table: skills/data-pipeline/evals/fixtures/multi-source-join-contract.json. Can you generate the pipeline for fct_orders_usd_normalized?",
       "assertions": [
-        {"text": "Response explicitly identifies the two distinct source objects (silver.orders and silver.fx_rates) as the reason a single generated transform can't be produced automatically", "check": "response_mentions", "keywords": ["fx_rates", "join"]},
+        {"text": "Response explicitly identifies the two distinct source objects (silver.orders and silver.fx_rates) AND that this contract declares no table.source_joins -- as of this toolkit version a multi-source target CAN be generated automatically, but only when source_joins declares the actual join condition, which this contract doesn't", "check": "response_mentions", "keywords": ["fx_rates", "source_joins"]},
         {"text": "If a pipeline-manifest.json is produced at all, modality_decision.chosen is pyspark_notebook, not declarative_pipeline or lakeflow_connect", "check": "field_equals_if_present", "field": "modality_decision.chosen", "value": "pyspark_notebook"},
-        {"text": "Response does not claim complete, ready-to-deploy code was generated for the join itself", "check": "response_not_overclaiming", "forbidden_claims": ["ready to deploy", "fully generated the join"]}
+        {"text": "Response does not claim complete, ready-to-deploy code was generated for the join itself, and does not suggest forcing a single-source spec by dropping fx_rates", "check": "response_not_overclaiming", "forbidden_claims": ["ready to deploy", "fully generated the join"]}
       ]
     },
     {
@@ -101,6 +101,30 @@
         {"text": "declarative_pipeline's dlt.apply_changes has stored_as_scd_type=2 and track_history_column_list=[\"region\"], not the previous hardcoded stored_as_scd_type=1", "check": "generated_code_contains", "purpose": "pipeline_definition", "substrings": ["stored_as_scd_type=2", "track_history_column_list=[\"region\"]"]},
         {"text": "customer_id and customer_name still render as plain aliases, unaffected", "check": "generated_code_contains", "purpose": "pipeline_definition", "substrings": ["F.col(\"customer_id\").alias(\"customer_id\")", "F.col(\"full_name\").alias(\"customer_name\")"]},
         {"text": "If pyspark_notebook is generated for the same target, scd2_unsupported_notes flags region rather than silently rendering Type-1-only MERGE as if it satisfied scd_type: 2", "check": "field_contains", "field": "scd2_unsupported_notes", "expect_columns": ["region"]}
+      ]
+    },
+    {
+      "eval_id": 10,
+      "eval_name": "multi-source-denormalizing-dimension-with-self-join",
+      "prompt": "Here's a data contract for a denormalized product dimension -- it joins product, product_category (twice: once directly, once more via ParentProductCategoryID for a 1-level parent category), and product_model: skills/data-pipeline/evals/fixtures/denormalizing-dimension-join-contract.json. Generate the pipeline for dim_product.",
+      "assertions": [
+        {"text": "Produces a pipeline-manifest.json that passes scripts/validate_artifact.py --schema-type pipeline-manifest --supported-major 1", "check": "schema_valid"},
+        {"text": "modality_decision.chosen is declarative_pipeline, not pyspark_notebook -- this is a plain equality lookup join (simple_declarative), not a reason to force hand-authoring", "check": "field_equals", "field": "modality_decision.chosen", "value": "declarative_pipeline"},
+        {"text": "The generated code joins product_category twice with distinct aliases (category, parent_category), never colliding or dropping one occurrence", "check": "generated_code_contains", "purpose": "pipeline_definition", "substrings": ["F.col(\"category.CategoryName\")", "F.col(\"parent_category.CategoryName\")"]},
+        {"text": "idempotency_check.result is not_applicable (multi-source local proof is a documented v1 scope limit) with the response explaining this is a local-proof limitation, not evidence the generated code is wrong", "check": "field_equals", "field": "idempotency_check.result", "value": "not_applicable"},
+        {"text": "readiness_level still reaches validated -- not_applicable does not cap readiness the way a real mismatch or type_mismatch_gap would", "check": "field_equals", "field": "readiness_level", "value": "validated"}
+      ]
+    },
+    {
+      "eval_id": 11,
+      "eval_name": "multi-source-header-rollup-and-expression-based-dimension-lookup",
+      "prompt": "Here's a data contract for a sales order line fact whose customer/address/order-number attributes live one level up on the order header, plus a date dimension lookup: skills/data-pipeline/evals/fixtures/header-rollup-dimension-lookup-contract.json. Generate the pipeline for fact_sales_order_line.",
+      "assertions": [
+        {"text": "Produces a pipeline-manifest.json that passes scripts/validate_artifact.py --schema-type pipeline-manifest --supported-major 1", "check": "schema_valid"},
+        {"text": "modality_decision.chosen is declarative_pipeline -- a header-to-line rollup plus a dimension surrogate-key lookup are both plain equality lookups, still simple_declarative", "check": "field_equals", "field": "modality_decision.chosen", "value": "declarative_pipeline"},
+        {"text": "The generated code resolves order_date_key via a CAST(header.OrderDate AS DATE) join condition against dim_date, not a bare column join", "check": "generated_code_contains", "purpose": "pipeline_definition", "substrings": ["F.expr(\"CAST(header.OrderDate AS DATE)\")"]},
+        {"text": "merge_keys is the fact's own composite grain (sales_order_id, sales_order_detail_id), not a header-table key", "check": "field_equals", "field": "targets[0].merge_keys", "value": ["sales_order_id", "sales_order_detail_id"]},
+        {"text": "Response explicitly surfaces that the local idempotency proof is not_applicable for this multi-source target and why, rather than a generic success claim", "check": "response_mentions", "keywords": ["not_applicable", "multi-source"]}
       ]
     }
   ]

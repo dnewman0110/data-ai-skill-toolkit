@@ -7,8 +7,11 @@ all, or confine every write to a provably in-memory, ephemeral scratch database,
 target), malformed/unsupported-major artifact rejection, the modality rubric's priority order,
 mock data respecting declared nullability/uniqueness, the local idempotency proof on both a
 healthy and a deliberately-broken spec, code generation for all three modalities (including a
-Python syntax check via compile()), the documented multi-source-join refusal, and a full
-transform-spec-to-validated-pipeline-manifest smoke test against the real example contract.
+Python syntax check via compile()), declared multi-source equality-lookup joins actually rendering
+a real multi-table join (a self-join dimension, a header-rollup-plus-expression-based-dimension-
+lookup fact) plus every remaining refusal path (no source_joins declared, an inconsistent
+source_joins declaration), and a full transform-spec-to-validated-pipeline-manifest smoke test
+against the real example contract.
 
 The scenario evals requiring modality-classification reasoning are graded separately via
 subagent runs -- see evals/README.md.
@@ -359,6 +362,107 @@ bridge_mock_rows = [{"property_id": 1, "amenity_id": 2}, {"property_id": 1, "ame
 bridge_idem = validate_pipeline_locally(bridge_spec, bridge_mock_rows)
 check("an all-merge-key (bridge table) spec no longer raises OperationalError",
       bridge_idem["result"] == "match")
+
+# -- 6. Multi-source joins: a declared table.source_joins is rendered as a real multi-table join
+#       (not refused), for both worked shapes -- a denormalizing self-join dimension and a
+#       header-rollup-plus-expression-based-dimension-lookup fact. See DECISIONS.md and
+#       references/decision-rubric.md's worked example.
+from generate_pipeline_code import generate_pipeline_code as _generate_pipeline_code  # noqa: E402
+from build_pipeline_manifest import build_pipeline_findings  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+dim_contract = json.loads((SKILL_DIR / "evals" / "fixtures" / "denormalizing-dimension-join-contract.json").read_text())
+dim_spec = build_transform_spec(dim_contract, "dim_product")
+check("Case 1 (denormalizing dimension): spec is multi-source", dim_spec["is_multi_source"])
+check("Case 1: product_category appears twice with two distinct aliases (self-join disambiguation)",
+      sorted(s["alias"] for s in dim_spec["sources"] if s["table"] == "product_category") == ["category", "parent_category"])
+check("Case 1: the parent-category join's left_alias is the FIRST join's alias ('category'), not the driving alias -- proves a join can reference an earlier join, not just the driving object",
+      any(j["alias"] == "parent_category" and j["on"][0]["left_alias"] == "category" for j in dim_spec["joins"]))
+
+fact_contract = json.loads((SKILL_DIR / "evals" / "fixtures" / "header-rollup-dimension-lookup-contract.json").read_text())
+fact_spec = build_transform_spec(fact_contract, "fact_sales_order_line")
+check("Case 2 (header rollup + dimension lookup): spec is multi-source", fact_spec["is_multi_source"])
+check("Case 2: the dimension lookup join uses left_expression (a cast), not a bare left_column",
+      any(j["alias"] == "date_dim" and j["on"][0]["left_expression"] == "CAST(header.OrderDate AS DATE)"
+          and j["on"][0]["left_column"] is None for j in fact_spec["joins"]))
+check("Case 2: merge_keys still derive correctly from the fact's own composite uniqueness test",
+      fact_spec["merge_keys"] == ["sales_order_id", "sales_order_detail_id"])
+
+for label, spec in [("Case 1", dim_spec), ("Case 2", fact_spec)]:
+    with _tempfile.TemporaryDirectory() as tmp:
+        codegen = _generate_pipeline_code(spec, "declarative_pipeline", Path(tmp))
+        pipeline_path = Path(tmp) / [f["path"] for f in codegen["generated_files"] if f["purpose"] == "pipeline_definition"][0]
+        code_text = pipeline_path.read_text()
+        compile(code_text, str(pipeline_path), "exec")
+        check(f"{label}: generated declarative_pipeline.py compiles", True)
+        check(f"{label}: generated code contains a real .join( call, not a single-table read",
+              ".join(" in code_text)
+        check(f"{label}: every declared join alias is qualified in the generated SELECT (F.col(\"<alias>.<col>\"))",
+              all(f'F.col("{c["join_alias"]}.{c["source_column"]}")' in code_text
+                  for c in spec["columns"] if not c.get("transformation")))
+
+for label, fname, table_name in [
+    ("Case 1", "denormalizing-dimension-join-contract.json", "dim_product"),
+    ("Case 2", "header-rollup-dimension-lookup-contract.json", "fact_sales_order_line"),
+]:
+    contract = json.loads((SKILL_DIR / "evals" / "fixtures" / fname).read_text())
+    with _tempfile.TemporaryDirectory() as tmp:
+        result = build_pipeline_findings(contract, table_name, "declarative_pipeline", Path(tmp))
+        check(f"{label}: build_pipeline_findings does not halt", not result["halted"])
+        check(f"{label}: idempotency_check.result is honestly not_applicable, not a fabricated match",
+              not result["halted"] and result["idempotency_check"]["result"] == "not_applicable"
+              and "multiple source objects" in result["idempotency_check"]["method"])
+        check(f"{label}: mock_data.generated is false rather than writing a misleading flat mock blend",
+              not result["halted"] and result["mock_data"]["generated"] is False)
+
+# Multi-source validation errors: catch an inconsistent contract rather than guessing which half is right.
+_bad_base = {
+    "name": "t", "target_catalog": "c", "target_schema": "gold",
+    "source_joins": {
+        "driving_object": "c.s.a", "driving_alias": "a",
+        "joins": [{"alias": "b", "object": "c.s.b", "join_type": "left",
+                   "on": [{"left_alias": "a", "left_column": "k", "right_column": "k"}]}],
+    },
+    "columns": [
+        {"name": "x", "type": "int", "nullable": False, "source": {"object": "c.s.a", "join_alias": "a", "column": "x", "mapping_type": "explicit_alias"}},
+        {"name": "y", "type": "int", "nullable": False, "source": {"object": "c.s.b", "join_alias": "b", "column": "y", "mapping_type": "explicit_alias"}},
+    ],
+    "tests": [],
+}
+import copy as _copy  # noqa: E402
+
+_forward_ref = _copy.deepcopy(_bad_base)
+_forward_ref["source_joins"]["joins"][0]["on"][0]["left_alias"] = "nosuchalias"
+try:
+    build_transform_spec({"tables": [_forward_ref]}, "t")
+    check("source_joins referencing an unknown/unintroduced alias is refused", False)
+except ValueError as e:
+    check("source_joins referencing an unknown/unintroduced alias is refused", "not driving_alias or an earlier" in str(e))
+
+_mismatch = _copy.deepcopy(_bad_base)
+_mismatch["columns"][1]["source"]["join_alias"] = "a"
+try:
+    build_transform_spec({"tables": [_mismatch]}, "t")
+    check("a column's join_alias inconsistent with its own source.object is refused", False)
+except ValueError as e:
+    check("a column's join_alias inconsistent with its own source.object is refused", "inconsistent contract" in str(e))
+
+_dup_alias = _copy.deepcopy(_bad_base)
+_dup_alias["source_joins"]["driving_alias"] = "b"
+try:
+    build_transform_spec({"tables": [_dup_alias]}, "t")
+    check("a duplicate source_joins alias is refused", False)
+except ValueError as e:
+    check("a duplicate source_joins alias is refused", "more than once" in str(e))
+
+_unneeded = _copy.deepcopy(_bad_base)
+_unneeded["columns"] = [_copy.deepcopy(_bad_base["columns"][0])]
+try:
+    build_transform_spec({"tables": [_unneeded]}, "t")
+    check("source_joins declared but every column maps from a single source object is refused", False)
+except ValueError as e:
+    check("source_joins declared but every column maps from a single source object is refused",
+          "isn't needed" in str(e))
 
 print()
 if failures:

@@ -40,6 +40,42 @@ rename (no transformation needed), a bare expression like `"CAST(total_amt AS DE
 `"DATEDIFF(check_out, check_in)"` for a real one, and put any rationale for *why* in this fact's
 `assumptions[]` entry instead, same as any other design decision worth explaining.
 
+## Multi-source facts and dimensions
+
+Design the correct grain and mappings first, from the real silver objects the business need
+actually requires -- never compromise the design because a single source object would be simpler
+to specify. `data-pipeline` renders a real multi-table join for any fact or dimension whose
+attributes genuinely come from more than one silver object, as long as every join is a plain
+equality-condition lookup (many-to-one from the fact's/dimension's own grain object's
+perspective) -- exactly the two shapes below. Declare `facts[].source_joins` or
+`dimensions[].source_joins` (same structured shape in both) to carry the join through
+`data-discovery`'s resolution mode into `data-contract.json` unchanged; `source_to_target_mappings[]`
+/ `attributes[].source_mapping` then set `join_alias` to say which declared object each mapping
+actually comes from.
+
+- **A snowflaked/denormalized dimension**: a product dimension sourcing `product` (the grain
+  object), `product_category` (joined on a foreign key), and `product_model` (joined on another) --
+  the classic "flatten a snowflake into one wide dimension" case. If the same object needs joining
+  more than once (a category self-joined via `ParentProductCategoryID` to also pull in a 1-level
+  parent category name), give each occurrence its own `alias` in `source_joins.joins[]` -- the
+  object repeats, the alias never does.
+- **A fact whose attributes live at more than one grain**: an order-line fact whose own grain is
+  `(SalesOrderID, SalesOrderDetailID)`, but several attributes (a customer key, a degenerate order
+  number) live one level up on the order-header table, `1:many` rolled down to the line grain by
+  joining on `SalesOrderID`. A further dimension surrogate-key lookup (resolving `order_date_key`
+  by matching a cast source date against `dim_date.calendar_date`) is the same shape again --
+  still a plain equality condition once the cast (`source_joins.joins[].on[].left_expression`,
+  e.g. `"CAST(header.OrderDate AS DATE)"` -- same free-text-SQL, no-trailing-comment rule as
+  `transformation` above) is applied.
+
+**What still doesn't belong in `source_joins`, by design**: a join that isn't a plain equality
+condition (a range/`BETWEEN` predicate), a join that would fan out the grain object's rows
+(one-to-many in the wrong direction), or anything needing aggregation to resolve. If a design
+genuinely needs one of these, that's usually a sign the grain or the join direction itself needs
+re-thinking, not something to route around -- `data-pipeline` correctly refuses to render it and
+routes to hand-authored `pyspark_notebook` instead (`transform_complexity: complex_procedural`,
+see `skills/data-pipeline/references/decision-rubric.md`'s worked example).
+
 ## Degenerate dimensions
 
 An operational identifier that lives ON the fact table itself rather than in its own dimension

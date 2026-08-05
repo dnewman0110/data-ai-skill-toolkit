@@ -1191,4 +1191,92 @@ just accepted on the subagent's word.
     end, plus every refusal path (wrong modality, not yet approved, `target_named` naming a
     nonexistent target, an unsupported `source_system`, a multi-target manifest's unnamed targets).
 
+60. **`data-pipeline` now generates real multi-table joins for a data-contract target whose
+    columns come from more than one source object -- narrowing, not removing, the v1 guardrail
+    that used to treat ANY multi-source target as automatically `complex_procedural`.** Prompted
+    by a real engagement hitting the old refusal twice in one session (a denormalized 3-object
+    product dimension with a self-join, and a fact whose attributes lived across two grains plus a
+    dimension lookup) and having to hand-author both PySpark scripts instead of using the toolkit,
+    even though both were plain many-to-one lookup joins -- exactly the shape Declarative Pipelines
+    already handles for everything else.
+
+    **New `table.source_joins` (data-contract) / `facts[].source_joins` and
+    `dimensions[].source_joins` (model-spec) field: a structured, EQUALITY-ONLY join declaration,
+    never a raw boolean SQL expression.** A driving/grain object plus one or more joined objects,
+    each with an explicit `join_type` and `on` conditions (`left_alias`/`left_column` or, for a
+    join key needing a cast/derivation, `left_expression` -- same free-text-SQL precedent as
+    `source.transformation` -- paired with `right_column`). Deliberately structural rather than a
+    free-text join clause: a range/`BETWEEN` predicate, a fan-out-risk one-to-many join, or
+    anything needing aggregation has no field to go in, by design, not by omission -- forcing an
+    approximate equality condition onto a genuinely non-equality relationship would silently
+    produce wrong results, exactly what `toolkit-conventions.md` #6 rules out. This is also why the
+    two schemas' shapes are kept identical: `data-modeling` designs the join against real,
+    silver-verified objects; `data-discovery`'s resolution mode carries it through into the
+    data-contract unchanged, the same "design once, resolve, never re-litigate" pattern the rest of
+    the toolkit already uses for `source_to_target_mappings`.
+
+    **A repeated source object (a self-join) is disambiguated by alias, never by object name.**
+    `source_joins.joins[].alias` must be unique even when the same object is joined more than once
+    (the product-category-joined-twice case) -- `build_transform_spec.py` cross-checks every
+    column's `source.join_alias` against its own `source.object`, refusing an inconsistent
+    contract (wrong alias claimed for a column, an alias that isn't declared, a `left_alias`
+    referencing something not yet introduced) rather than guessing which one is right.
+
+    **`source_system` lesson reapplied here**: just like decision 59's reasoning for
+    `data-deploy`'s connector-type resolution, there was no reliable way to derive "which columns
+    belong to which source object" from string inspection alone once more than one object is in
+    play (a self-joined object's two occurrences are literally the same string) -- `join_alias` is
+    an explicit, required field precisely so this is never inferred.
+
+    **Rendering, real code**: `build_transform_spec.py` resolves `source_joins` into portable
+    `sources[]`/`joins[]` lists; `generate_pipeline_code.py` renders a real `.alias(...).join(...)`
+    chain, qualifying every column reference `F.col("<alias>.<column>")`. **Every JOINED
+    (non-driving) object is read via `spark.read.table(...)` -- a static batch snapshot -- even
+    when the driving object streams** (the `declarative_pipeline` merge_upsert staging view). This
+    is the standard, documented stream-static join pattern (no watermark needed, since only one
+    side streams) and is exactly right for a genuine lookup join; it would be the wrong choice for
+    a join whose looked-up side itself needed CDC/incremental behavior, but that's precisely the
+    fan-out-risk/aggregation shape excluded from `source_joins` already, so it never reaches this
+    path. See `skills/data-pipeline/references/declarative-pipelines.md`.
+
+    **`decision-rubric.md`'s `transform_complexity` narrowed accordingly**: a multi-source target
+    with ONLY declared equality lookup joins is `simple_declarative` (routes to
+    `declarative_pipeline`, same as any other reshape); a multi-source target with NO
+    `source_joins` declared, or a join that genuinely can't be expressed as one, stays
+    `complex_procedural` (routes to `pyspark_notebook`, hand-authored). A worked example
+    distinguishing the two was added, using the exact denormalizing-join vs. range-join/aggregation
+    contrast from the real engagement that prompted this fix.
+
+    **Local idempotency proof: `not_applicable` for multi-source, a deliberate v1 scope decision,
+    not a silent gap.** `derive_mock_data.py` synthesizes ONE flat mock table per target, keyed by
+    bare source column name, with no notion of multiple mock tables sharing real foreign-key
+    relationships across aliases (and a self-join's two occurrences would collide on identical
+    column names in that flat namespace regardless). A join-based local proof against mock data
+    that doesn't genuinely share join keys would either crash or "prove" idempotency by joining
+    everything to NULL -- neither is real evidence, and reporting `match` anyway would be exactly
+    the confidently-wrong artifact this toolkit's rules forbid. `validate_pipeline_locally.py`
+    short-circuits to `not_applicable` (same treatment as `lakeflow_connect`, doesn't cap
+    `readiness_level` below `validated`) before ever calling `render_select_sql` (which now refuses
+    outright on a multi-source spec rather than silently rendering only the driving object's
+    columns), and `build_pipeline_manifest.py` skips writing a mock-data file entirely rather than
+    write one that blends columns from genuinely different real objects into one misleading row
+    shape. The REAL generated Spark code is unaffected -- only this local, SQLite-based proof
+    doesn't cover multi-source yet. See `skills/data-pipeline/references/idempotency-and-mock-data.md`.
+
+    **What's deliberately still out of scope, same as before**: a join that isn't a plain equality
+    condition, and the pre-existing `streaming_cdc` load-pattern gap (unrelated, unaffected by this
+    change). Both remain documented in `references/other-modalities.md`, not silently dropped.
+
+    **Backward compatible**: `source_joins`/`join_alias` are optional, additive fields on both
+    schemas (`data-contract.schema.json` bumped to a documented `1.2.0`-generation shape,
+    `model-spec.schema.json` similarly) -- every existing single-source contract/model-spec
+    validates and builds completely unchanged. The existing inline single-source-only refusal test
+    in `skills/data-pipeline/evals/run_assertions.py` still passes verbatim (the error message still
+    contains "single-source", now alongside guidance toward the new escape hatch). The pre-existing
+    `multi-source-join-contract.json` fixture (an FX-rate lookup with no declared join condition)
+    still correctly refuses -- its accompanying scenario eval was reworded to reflect the real,
+    narrower reason (`no source_joins declared`, not `multi-source is inherently complex`) rather
+    than changed to a different scenario, since the fixture is still valid, useful coverage of that
+    refusal path on its own.
+
 *(Further decisions will be appended here as later phases proceed.)*

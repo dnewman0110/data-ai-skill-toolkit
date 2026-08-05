@@ -6,6 +6,34 @@ README.md "Versioning" for how this relates to per-skill and per-schema versions
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-05
+
+### Added
+- **Multi-source join support in `data-pipeline`.** `build_transform_spec.py` now renders a real
+  multi-table join (a genuine `.join()` chain, not a stub) when a `data-contract.json` declares
+  `table.source_joins` -- a structured, equality-only join (driving object + one or more joined
+  objects, each with an explicit `join_type` and column-equality `on` conditions; a join key
+  needing a cast/derivation uses `left_expression`, same free-text-SQL precedent as
+  `source.transformation`). This covers genuine many-to-one lookup joins -- denormalizing a
+  snowflaked dimension (including a self-join, disambiguated by a required, unique `alias` per
+  join), rolling a header table's attributes down to a fact's own grain, a dimension surrogate-key
+  lookup -- and classifies as `transform_complexity: simple_declarative`, routing to
+  `declarative_pipeline` like any other reshape (`references/decision-rubric.md`'s narrowed
+  guardrail, with a new worked example distinguishing this from genuine multi-source complexity).
+  `model-spec.schema.json` gained the equivalent `facts[].source_joins`/`dimensions[].source_joins`
+  so `data-modeling` can design these joins directly, carried through `data-discovery`'s resolution
+  mode into the data-contract unchanged. A multi-source target with no `source_joins` declared, or
+  a join that can't be expressed as an equality condition, still refuses outright and routes to
+  `pyspark_notebook` -- the guardrail is narrowed, not removed. Every JOINED (non-driving) object
+  is read as a static batch snapshot even when the driving object streams (the standard,
+  documented stream-static join pattern for a lookup join -- see
+  `references/declarative-pipelines.md`). The local SQLite-based idempotency proof reports
+  `not_applicable` for multi-source targets (a documented v1 scope decision, not a silent gap --
+  `derive_mock_data.py` has no notion of multiple mock tables sharing real foreign-key
+  relationships across aliases); the real generated Spark code is unaffected. `data-pipeline`
+  bumped to `1.2.0`, `data-modeling` to `1.1.0`, `data-discovery` to `1.3.0` (resolution-mode
+  carry-through instructions). See DECISIONS.md decision 60.
+
 ## [1.3.0] - 2026-08-05
 
 ### Added

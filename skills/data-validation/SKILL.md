@@ -142,4 +142,4 @@ arbitrary code.
 - `references/known-acceptable-differences.md` -- the declaration format for expected/accepted
   discrepancies and how they're excluded from `discrepancies[]` without being silently forgotten
   (`known_acceptable_differences_excluded[]` still records them).
-- `references/toolkit-conventions.md` -- cross-cutting rules shared by all five skills.
+- `references/toolkit-conventions.md` -- cross-cutting rules shared by all six skills.
