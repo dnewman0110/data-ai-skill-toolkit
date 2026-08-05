@@ -69,12 +69,24 @@ def build_findings(adapter, targets: list[tuple[str, str]], thresholds: dict,
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--backend", choices=["sqlite_fixture", "databricks_connect"], default="sqlite_fixture",
-                         help="From toolkit.yaml's environment.backend. sqlite_fixture (evals/local "
-                              "dev, needs --lakehouse-dir) or databricks_connect (production, via an "
-                              "already-authenticated Databricks Connect session).")
+    parser.add_argument("--backend", choices=["sqlite_fixture", "databricks_connect", "sqlserver"], default="sqlite_fixture",
+                         help="From toolkit.yaml's environment.backend (sqlite_fixture/databricks_connect) "
+                              "or external_sources.sqlserver.enabled (sqlserver, for pre-ingestion "
+                              "profiling -- see references/sqlserver-profiling.md). sqlite_fixture "
+                              "(evals/local dev, needs --lakehouse-dir), databricks_connect (production, "
+                              "via an already-authenticated Databricks Connect session), or sqlserver "
+                              "(needs --sqlserver-host/--sqlserver-database, plus auth per --sqlserver-auth-mode).")
     parser.add_argument("--lakehouse-dir", default=None, help="Required when --backend sqlite_fixture.")
-    parser.add_argument("--catalog", default="acme_retail_dev")
+    parser.add_argument("--catalog", default="acme_retail_dev", help="Ignored when --backend sqlserver -- use --sqlserver-database instead.")
+    parser.add_argument("--sqlserver-host", default=None, help="Required when --backend sqlserver. From toolkit.yaml's external_sources.sqlserver.host.")
+    parser.add_argument("--sqlserver-database", default=None, help="Required when --backend sqlserver. From toolkit.yaml's external_sources.sqlserver -- not a secret.")
+    parser.add_argument("--sqlserver-driver", default="ODBC Driver 18 for SQL Server")
+    parser.add_argument("--sqlserver-port", type=int, default=1433)
+    parser.add_argument("--sqlserver-auth-mode", choices=["azure_ad_default", "sql_auth_env", "windows_integrated"], default="azure_ad_default")
+    parser.add_argument("--sqlserver-username-env-var", default=None,
+                         help="sql_auth_env only. NAME of an environment variable holding the username -- never the value itself.")
+    parser.add_argument("--sqlserver-password-env-var", default=None,
+                         help="sql_auth_env only. NAME of an environment variable holding the password -- never the value itself.")
     parser.add_argument("--target", action="append", required=True, help="schema.table, repeatable")
     parser.add_argument("--candidate-fk", action="append", default=[],
                          help="schema.table:column:ref_schema.ref_table.ref_column, repeatable")
@@ -90,6 +102,8 @@ def main():
 
     if args.backend == "sqlite_fixture" and not args.lakehouse_dir:
         parser.error("--lakehouse-dir is required when --backend sqlite_fixture")
+    if args.backend == "sqlserver" and not (args.sqlserver_host and args.sqlserver_database):
+        parser.error("--sqlserver-host and --sqlserver-database are required when --backend sqlserver")
 
     targets = [tuple(t.split(".", 1)) for t in args.target]
 
@@ -105,7 +119,14 @@ def main():
     if args.sensitive_columns_json:
         sensitive_columns = json.loads(args.sensitive_columns_json.read_text())
 
-    adapter = build_adapter(args.backend, lakehouse_dir=args.lakehouse_dir, catalog=args.catalog)
+    adapter = build_adapter(
+        args.backend, lakehouse_dir=args.lakehouse_dir, catalog=args.catalog,
+        sqlserver_host=args.sqlserver_host, sqlserver_database=args.sqlserver_database,
+        sqlserver_driver=args.sqlserver_driver, sqlserver_port=args.sqlserver_port,
+        sqlserver_auth_mode=args.sqlserver_auth_mode,
+        sqlserver_username_env_var=args.sqlserver_username_env_var,
+        sqlserver_password_env_var=args.sqlserver_password_env_var,
+    )
     result = build_findings(
         adapter, targets,
         thresholds={"max_rows_scanned": args.max_rows_scanned, "max_bytes_scanned": args.max_bytes_scanned},

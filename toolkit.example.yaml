@@ -31,6 +31,28 @@ environment:
   orchestration: databricks_jobs     # databricks_jobs | dagster | adf | varies
   transformation_framework: native   # native | dbt
 
+external_sources:                    # sources data-discovery can profile BEFORE ingestion (greenfield
+                                      # mode, --backend sqlserver) -- distinct from environment above,
+                                      # which describes the lakehouse DESTINATION. See
+                                      # skills/data-discovery/references/sqlserver-profiling.md.
+  sqlserver:
+    enabled: false
+    host: "<server>.database.windows.net"
+    port: 1433
+    driver: "ODBC Driver 18 for SQL Server"   # must also be installed at the OS level, not just pip
+    auth_mode: azure_ad_default         # azure_ad_default (recommended for Azure SQL Database/Managed
+                                        # Instance -- reuses whatever's already logged into Azure, e.g.
+                                        # az login or a managed identity, same "ambient session" posture
+                                        # as environment.backend: databricks_connect above -- no secret
+                                        # here at all) | sql_auth_env (SQL Server auth; see below) |
+                                        # windows_integrated (on-prem, trusted connection, no secret)
+    # sql_auth_env only -- NAMES of environment variables to read at connection time, never the
+    # credential values themselves. Set the actual username/password in your own shell before
+    # running Claude Code; this toolkit never sees them, never writes them anywhere, and never
+    # prompts for them in chat -- see references/toolkit-conventions.md #2.
+    username_env_var: null              # e.g. "SQLSERVER_USERNAME"
+    password_env_var: null              # e.g. "SQLSERVER_PASSWORD"
+
 python:
   version: "3.11"
 

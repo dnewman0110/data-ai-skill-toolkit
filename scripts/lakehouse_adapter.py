@@ -5,7 +5,7 @@ talk to "the lakehouse", so the same profiling/scan code runs against the local 
 fixture (offline, in evals/CI) and a real Databricks/Unity Catalog workspace (in production)
 without a single skill script knowing which one it's talking to.
 
-Two backends:
+Three backends:
   - SQLiteFixtureAdapter: used for evals and local development against fixtures/. Requires
     nothing beyond the Python standard library (sqlite3) -- deliberately chosen so running a
     skill's evals never requires installing anything. Simulates Unity Catalog's catalog.schema.table
@@ -19,6 +19,17 @@ Two backends:
     toolkit's own evals (no live workspace in CI) -- correctness here rests on matching the
     documented databricks-connect/information_schema APIs, not on a test run. Any skill built
     against LakehouseAdapter's interface should work against either backend unmodified.
+  - SqlServerAdapter: used by data-discovery to profile a SQL Server source BEFORE it's ingested
+    into the lakehouse at all (see skills/data-discovery/references/sqlserver-profiling.md) --
+    `catalog` plays the same role as SQL Server's "database". Auth is ambient, same posture as
+    DatabricksConnectAdapter: toolkit.yaml names connection shape and an auth_mode
+    (azure_ad_default | sql_auth_env | windows_integrated), never a secret value itself -- see
+    references/toolkit-conventions.md #2. Requires `pyodbc` (and, for azure_ad_default,
+    `azure-identity`), lazy-imported so the other two backends never need them installed. Like
+    DatabricksConnectAdapter, not exercised against a live database by this toolkit's own evals
+    (see the mocked-connection tests in skills/data-discovery/evals/run_assertions.py for what IS
+    covered without one) -- verify against a real (sandbox) SQL Server/Azure SQL Database before
+    relying on it in an engagement.
 
 `build_adapter()` below is the one place a caller picks between them, given an already-resolved
 `backend` string (sqlite_fixture | databricks_connect) -- callers get that string from
@@ -33,6 +44,7 @@ know about toolkit.yaml.
 from __future__ import annotations
 
 import abc
+import os
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -494,12 +506,334 @@ class DatabricksConnectAdapter(LakehouseAdapter):
         return next(iter(first_row.values()))
 
 
+class SqlServerAdapter(LakehouseAdapter):
+    """Pre-ingestion backend: profiles a SQL Server database directly, before anything is landed
+    in the lakehouse -- see skills/data-discovery/references/sqlserver-profiling.md for the
+    workflow this feeds into (a bronze-landing data-contract.json that data-pipeline's existing
+    source_is_managed_connector rubric already routes to lakeflow_connect, no changes needed
+    there). `database` plays the same role `catalog` plays on the other two adapters.
+
+    Auth is ambient, same posture as DatabricksConnectAdapter (references/toolkit-conventions.md
+    #2): this class never reads toolkit.yaml or a secret store itself. Three modes, chosen via
+    `auth_mode`:
+      - "azure_ad_default" (recommended when the SQL Server is Azure SQL Database/Managed
+        Instance, the natural parallel to Databricks Connect's own OAuth session): fetches a
+        token from whatever's already logged in (Azure CLI, managed identity, env-based service
+        principal) via azure-identity's DefaultAzureCredential. No username/password at all.
+      - "sql_auth_env": reads the username/password from the environment variables NAMED by
+        `username_env_var`/`password_env_var` (which come from toolkit.yaml -- never the values
+        themselves). Halts with a clear message naming the missing variable if either isn't set,
+        per toolkit-conventions.md #2's "halt, name the missing key" rule -- never guesses or
+        prompts.
+      - "windows_integrated": trusted connection, no credential material at all -- for an on-prem
+        SQL Server where the host machine's domain identity already has access.
+
+    Requires `pyodbc` (lazy-imported, same pattern DatabricksConnectAdapter uses for
+    databricks.connect) plus the Microsoft ODBC Driver for SQL Server installed at the OS level --
+    a real, non-Python environment dependency, not just a pip install. `azure_ad_default` also
+    needs `azure-identity`. Accepts a pre-built `conn` (a pyodbc-Connection-shaped object) for
+    testing without either package or a real server -- see
+    skills/data-discovery/evals/run_assertions.py's mocked-connection tests, the only coverage
+    this class gets without a live SQL Server (same limitation DatabricksConnectAdapter has always
+    had; verify against a real sandbox instance before relying on this in an engagement).
+
+    Structurally read-only like the other two adapters (LakehouseAdapter has no write method at
+    all) -- but the real security boundary is the credential itself being a database-level
+    read-only login, same caveat assert_read_only_select's own docstring already states for
+    execute_scalar: an app-level guard is defense-in-depth, not the boundary on its own.
+    """
+
+    def __init__(self, host: str, database: str, driver: str = "ODBC Driver 18 for SQL Server",
+                 port: int = 1433, auth_mode: str = "azure_ad_default",
+                 username_env_var: str | None = None, password_env_var: str | None = None,
+                 conn=None):
+        self.database = database
+        if conn is not None:
+            self.conn = conn
+            return
+
+        # Validate auth_mode/config BEFORE importing pyodbc -- a toolkit.yaml misconfiguration
+        # (unknown auth_mode, a missing env var name) should fail with a clear message regardless
+        # of whether pyodbc happens to be installed yet, not be masked by an unrelated ImportError.
+        username = password = token = None
+        if auth_mode == "sql_auth_env":
+            if not username_env_var or not password_env_var:
+                raise ValueError(
+                    "auth_mode 'sql_auth_env' requires both username_env_var and password_env_var "
+                    "to be set in toolkit.yaml's external_sources.sqlserver block -- names of "
+                    "environment variables to read, never the credential values themselves."
+                )
+            username = os.environ.get(username_env_var)
+            password = os.environ.get(password_env_var)
+            if username is None:
+                raise ValueError(
+                    f"toolkit.yaml's external_sources.sqlserver.username_env_var names "
+                    f"'{username_env_var}', but that environment variable is not set."
+                )
+            if password is None:
+                raise ValueError(
+                    f"toolkit.yaml's external_sources.sqlserver.password_env_var names "
+                    f"'{password_env_var}', but that environment variable is not set."
+                )
+        elif auth_mode == "azure_ad_default":
+            try:
+                from azure.identity import DefaultAzureCredential
+            except ImportError as e:
+                raise ImportError(
+                    "auth_mode 'azure_ad_default' requires the 'azure-identity' package. "
+                    "Install with: pip install azure-identity"
+                ) from e
+            token = DefaultAzureCredential().get_token("https://database.windows.net/.default").token
+        elif auth_mode != "windows_integrated":
+            raise ValueError(
+                f"Unknown auth_mode '{auth_mode}' -- expected 'azure_ad_default', 'sql_auth_env', "
+                "or 'windows_integrated'."
+            )
+
+        try:
+            import pyodbc
+        except ImportError as e:
+            raise ImportError(
+                "SqlServerAdapter requires the 'pyodbc' package, plus the Microsoft ODBC Driver "
+                "for SQL Server installed at the OS level (pyodbc alone is not enough). "
+                "Install with: pip install pyodbc"
+            ) from e
+
+        conn_str = (
+            f"DRIVER={{{driver}}};SERVER={host},{port};DATABASE={database};"
+            "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
+        )
+
+        if auth_mode == "azure_ad_default":
+            # pyodbc's documented shape for SQL_COPT_SS_ACCESS_TOKEN (1256): the token
+            # UTF-16-LE-encoded and length-prefixed as a little-endian 4-byte struct -- this exact
+            # encoding is pyodbc's own requirement for passing an AAD token, not this toolkit's
+            # invention.
+            token_bytes = token.encode("utf-16-le")
+            token_struct = len(token_bytes).to_bytes(4, "little") + token_bytes
+            self.conn = pyodbc.connect(conn_str, attrs_before={1256: token_struct})
+        elif auth_mode == "sql_auth_env":
+            self.conn = pyodbc.connect(conn_str + f"UID={username};PWD={password};")
+        else:
+            self.conn = pyodbc.connect(conn_str + "Trusted_Connection=yes;")
+
+    def _query(self, sql: str, params: tuple = ()) -> list[dict]:
+        cursor = self.conn.cursor()
+        cursor.execute(sql, params)
+        if cursor.description is None:
+            return []
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    @staticmethod
+    def _full_type(row: dict) -> str:
+        # Mirrors this toolkit's "decimal(18,2)"-style type naming elsewhere where SQL Server's
+        # own precision/scale metadata makes that possible; falls back to the bare DATA_TYPE
+        # otherwise (e.g. INT, DATE) -- a documented simplification, not a silent guess.
+        base = row["DATA_TYPE"]
+        max_len = row.get("CHARACTER_MAXIMUM_LENGTH")
+        if max_len not in (None, -1):
+            return f"{base}({max_len})"
+        if base in ("decimal", "numeric") and row.get("NUMERIC_PRECISION") is not None:
+            return f"{base}({row['NUMERIC_PRECISION']},{row['NUMERIC_SCALE']})"
+        return base
+
+    def list_tables(self, schema: str) -> list[str]:
+        rows = self._query(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'",
+            (schema,),
+        )
+        return [r["TABLE_NAME"] for r in rows]
+
+    def get_columns(self, schema: str, table: str) -> list[ColumnInfo]:
+        # LEFT JOIN sys.extended_properties for MS_Description -- SQL Server's equivalent of a
+        # Unity Catalog column comment, stored as an extended property, not a first-class
+        # INFORMATION_SCHEMA field.
+        rows = self._query(
+            "SELECT c.COLUMN_NAME, c.DATA_TYPE, c.IS_NULLABLE, c.CHARACTER_MAXIMUM_LENGTH, "
+            "c.NUMERIC_PRECISION, c.NUMERIC_SCALE, "
+            "CAST(ep.value AS NVARCHAR(MAX)) AS column_comment "
+            "FROM INFORMATION_SCHEMA.COLUMNS c "
+            "JOIN sys.tables t ON t.name = c.TABLE_NAME "
+            "JOIN sys.schemas s ON s.schema_id = t.schema_id AND s.name = c.TABLE_SCHEMA "
+            "LEFT JOIN sys.extended_properties ep "
+            "  ON ep.major_id = t.object_id "
+            "  AND ep.minor_id = COLUMNPROPERTY(t.object_id, c.COLUMN_NAME, 'ColumnId') "
+            "  AND ep.name = 'MS_Description' "
+            "WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ? "
+            "ORDER BY c.ORDINAL_POSITION",
+            (schema, table),
+        )
+        return [
+            ColumnInfo(name=r["COLUMN_NAME"], type=self._full_type(r),
+                       nullable=(r["IS_NULLABLE"] == "YES"), comment=r.get("column_comment"))
+            for r in rows
+        ]
+
+    def get_table_comment(self, schema: str, table: str) -> str | None:
+        rows = self._query(
+            "SELECT CAST(ep.value AS NVARCHAR(MAX)) AS comment "
+            "FROM sys.tables t "
+            "JOIN sys.schemas s ON s.schema_id = t.schema_id "
+            "LEFT JOIN sys.extended_properties ep "
+            "  ON ep.major_id = t.object_id AND ep.minor_id = 0 AND ep.name = 'MS_Description' "
+            "WHERE s.name = ? AND t.name = ?",
+            (schema, table),
+        )
+        return rows[0]["comment"] if rows else None
+
+    def get_constraints(self, schema: str, table: str) -> Constraints:
+        pk_rows = self._query(
+            "SELECT kcu.COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu "
+            "JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME "
+            "WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' "
+            "AND tc.TABLE_SCHEMA = ? AND tc.TABLE_NAME = ? ORDER BY kcu.ORDINAL_POSITION",
+            (schema, table),
+        )
+        # REFERENTIAL_CONSTRAINTS -> CONSTRAINT_COLUMN_USAGE is SQL Server's documented,
+        # version-stable way to map an FK constraint to the column it actually references (the
+        # unique/PK constraint on the other side) -- sys.foreign_key_columns is an alternative but
+        # this stays consistent with the INFORMATION_SCHEMA-first style DatabricksConnectAdapter
+        # already uses for the same query shape.
+        fk_rows = self._query(
+            "SELECT kcu.COLUMN_NAME, ccu.TABLE_SCHEMA AS ref_schema, ccu.TABLE_NAME AS ref_table, "
+            "ccu.COLUMN_NAME AS ref_column "
+            "FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu "
+            "JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME "
+            "JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc ON tc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME "
+            "JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu ON rc.UNIQUE_CONSTRAINT_NAME = ccu.CONSTRAINT_NAME "
+            "WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY' AND tc.TABLE_SCHEMA = ? AND tc.TABLE_NAME = ?",
+            (schema, table),
+        )
+        cols = self.get_columns(schema, table)
+        not_null = [c.name for c in cols if not c.nullable]
+        return Constraints(
+            primary_key=[r["COLUMN_NAME"] for r in pk_rows],
+            foreign_keys=[{"columns": [r["COLUMN_NAME"]], "ref_schema": r["ref_schema"],
+                            "ref_table": r["ref_table"], "ref_columns": [r["ref_column"]]} for r in fk_rows],
+            not_null=not_null,
+        )
+
+    def row_count(self, schema: str, table: str, exact: bool = True) -> int:
+        if not exact:
+            # sys.partitions' row count for the heap/clustered index (index_id IN (0,1)) is a
+            # cheap, no-full-scan estimate -- the standard SQL Server trick sp_spaceused itself
+            # uses internally, mirroring estimate_bytes' "cheap, no-full-read" contract.
+            rows = self._query(
+                "SELECT SUM(p.rows) AS n FROM sys.partitions p "
+                "JOIN sys.tables t ON p.object_id = t.object_id "
+                "JOIN sys.schemas s ON t.schema_id = s.schema_id "
+                "WHERE s.name = ? AND t.name = ? AND p.index_id IN (0, 1)",
+                (schema, table),
+            )
+            if rows and rows[0]["n"] is not None:
+                return int(rows[0]["n"])
+        rows = self._query(f"SELECT COUNT(*) AS n FROM [{schema}].[{table}]")
+        return rows[0]["n"]
+
+    def estimate_bytes(self, schema: str, table: str) -> int:
+        rows = self._query(
+            "SELECT SUM(ps.used_page_count) AS pages FROM sys.dm_db_partition_stats ps "
+            "JOIN sys.tables t ON ps.object_id = t.object_id "
+            "JOIN sys.schemas s ON t.schema_id = s.schema_id "
+            "WHERE s.name = ? AND t.name = ? AND ps.index_id IN (0, 1)",
+            (schema, table),
+        )
+        pages = rows[0]["pages"] if rows and rows[0]["pages"] is not None else 0
+        return int(pages) * 8 * 1024  # SQL Server pages are a fixed 8 KiB
+
+    def profile_column(self, schema: str, table: str, column: str, sample_size: int | None = None) -> ColumnProfile:
+        total = self.row_count(schema, table)
+        src = f"(SELECT TOP ({sample_size}) {column} FROM [{schema}].[{table}])" if sample_size \
+            else f"[{schema}].[{table}]"
+        rows = self._query(
+            f"SELECT COUNT(*) AS n, SUM(CASE WHEN {column} IS NULL THEN 1 ELSE 0 END) AS nulls, "
+            f"COUNT(DISTINCT {column}) AS distinct_n, MIN({column}) AS min_v, MAX({column}) AS max_v "
+            f"FROM {src}"
+        )
+        r = rows[0]
+        return ColumnProfile(column=column, total_rows=total, sampled_rows=r["n"],
+                              null_count=r["nulls"] or 0, distinct_count=r["distinct_n"] or 0,
+                              min_value=r["min_v"], max_value=r["max_v"])
+
+    def sample_rows(self, schema: str, table: str, columns: list[str], limit: int) -> list[dict]:
+        cols = ", ".join(columns)
+        return self._query(f"SELECT TOP ({limit}) {cols} FROM [{schema}].[{table}]")
+
+    def fetch_rows(self, schema: str, table: str, columns: list[str],
+                    order_by: list[str] | None = None, limit: int | None = None) -> list[dict]:
+        cols = ", ".join(columns)
+        top_clause = f"TOP ({limit}) " if limit is not None else ""
+        sql = f"SELECT {top_clause}{cols} FROM [{schema}].[{table}]"
+        if order_by:
+            sql += " ORDER BY " + ", ".join(order_by)
+        return self._query(sql)
+
+    def count_orphans(self, schema: str, table: str, column: str,
+                       ref_schema: str, ref_table: str, ref_column: str,
+                       sample_size: int | None = None) -> dict:
+        src = f"(SELECT TOP ({sample_size}) * FROM [{schema}].[{table}])" if sample_size \
+            else f"[{schema}].[{table}]"
+        # NOT EXISTS, not NOT IN -- T-SQL's well-known NOT IN + NULL footgun (if the subquery ever
+        # returns any NULL, NOT IN evaluates to UNKNOWN for every row, silently reporting zero
+        # orphans regardless of the real answer). NOT EXISTS has no such trap.
+        rows = self._query(
+            f"SELECT COUNT(*) AS n, SUM(CASE WHEN t.{column} IS NOT NULL AND NOT EXISTS "
+            f"(SELECT 1 FROM [{ref_schema}].[{ref_table}] r WHERE r.{ref_column} = t.{column}) "
+            f"THEN 1 ELSE 0 END) AS orphans FROM {src} AS t"
+        )
+        r = rows[0]
+        checked = r["n"] or 0
+        orphans = r["orphans"] or 0
+        return {"rows_checked": checked, "orphan_count": orphans,
+                "orphan_rate": (orphans / checked) if checked else 0.0}
+
+    def check_uniqueness(self, schema: str, table: str, columns: list[str],
+                          sample_size: int | None = None) -> dict:
+        cols = ", ".join(columns)
+        src = f"(SELECT TOP ({sample_size}) * FROM [{schema}].[{table}])" if sample_size \
+            else f"[{schema}].[{table}]"
+        not_null_clause = " AND ".join(f"{c} IS NOT NULL" for c in columns)
+        # Same NULL handling as the other two adapters: rows with a NULL in any key column are
+        # excluded from the distinctness check (standard UNIQUE-constraint semantics), not
+        # collapsed together as if they were duplicates of each other.
+        rows = self._query(
+            f"SELECT (SELECT COUNT(*) FROM {src}) AS n, "
+            f"(SELECT COUNT(*) FROM {src} WHERE {not_null_clause}) AS non_null_n, "
+            f"(SELECT COUNT(*) FROM (SELECT DISTINCT {cols} FROM {src} WHERE {not_null_clause}) AS d) AS distinct_n"
+        )
+        r = rows[0]
+        total = r["n"] or 0
+        non_null = r["non_null_n"] or 0
+        distinct = r["distinct_n"] or 0
+        return {"rows_checked": total, "rows_with_null_key": total - non_null,
+                "distinct_count": distinct, "is_unique": (non_null - distinct) == 0,
+                "duplicate_count": non_null - distinct}
+
+    def execute_scalar(self, schema: str, sql: str):
+        assert_read_only_select(sql)
+        rows = self._query(sql)
+        if not rows:
+            return None
+        return next(iter(rows[0].values()))
+
+
 def build_adapter(backend: str, lakehouse_dir: str | Path | None = None,
-                   catalog: str = "acme_retail_dev", spark=None) -> LakehouseAdapter:
+                   catalog: str = "acme_retail_dev", spark=None,
+                   sqlserver_host: str | None = None, sqlserver_database: str | None = None,
+                   sqlserver_driver: str = "ODBC Driver 18 for SQL Server",
+                   sqlserver_port: int = 1433, sqlserver_auth_mode: str = "azure_ad_default",
+                   sqlserver_username_env_var: str | None = None,
+                   sqlserver_password_env_var: str | None = None,
+                   sqlserver_conn=None) -> LakehouseAdapter:
     """Instantiates the right backend given an already-resolved `backend` value (sqlite_fixture |
-    databricks_connect). Callers get that string from toolkit.yaml's `environment.backend`
-    themselves and pass it straight through -- this function never reads toolkit.yaml directly
-    (see references/toolkit-conventions.md #2).
+    databricks_connect | sqlserver). Callers get that string, and every sqlserver_* value, from
+    toolkit.yaml themselves (environment.backend, or external_sources.sqlserver for the sqlserver
+    case) and pass it straight through -- this function never reads toolkit.yaml directly (see
+    references/toolkit-conventions.md #2). Note sqlserver_username_env_var/password_env_var are
+    environment variable NAMES, never credential values -- SqlServerAdapter resolves the actual
+    values itself, at connection time, from os.environ.
     """
     if backend == "sqlite_fixture":
         if lakehouse_dir is None:
@@ -507,4 +841,15 @@ def build_adapter(backend: str, lakehouse_dir: str | Path | None = None,
         return SQLiteFixtureAdapter(lakehouse_dir, catalog=catalog)
     if backend == "databricks_connect":
         return DatabricksConnectAdapter(catalog=catalog, spark=spark)
-    raise ValueError(f"Unknown backend '{backend}' -- expected 'sqlite_fixture' or 'databricks_connect'.")
+    if backend == "sqlserver":
+        if sqlserver_host is None:
+            raise ValueError("backend 'sqlserver' requires sqlserver_host")
+        if sqlserver_database is None:
+            raise ValueError("backend 'sqlserver' requires sqlserver_database")
+        return SqlServerAdapter(
+            host=sqlserver_host, database=sqlserver_database, driver=sqlserver_driver,
+            port=sqlserver_port, auth_mode=sqlserver_auth_mode,
+            username_env_var=sqlserver_username_env_var, password_env_var=sqlserver_password_env_var,
+            conn=sqlserver_conn,
+        )
+    raise ValueError(f"Unknown backend '{backend}' -- expected 'sqlite_fixture', 'databricks_connect', or 'sqlserver'.")

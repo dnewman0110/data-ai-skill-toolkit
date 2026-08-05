@@ -112,6 +112,16 @@ README.md "Versioning" for how this relates to per-skill and per-schema versions
   script calls with an already-resolved `backend` string (from toolkit.yaml's new
   `environment.backend`) to get either adapter, instead of every skill's build script hardcoding
   `SQLiteFixtureAdapter` directly. See DECISIONS.md decision 53.
+- `data-discovery` can now profile a SQL Server source in greenfield mode (`--backend sqlserver`)
+  BEFORE it's ingested into the lakehouse at all, so real data-quality problems surface before
+  anyone spends engineering time on the ingestion design. New `SqlServerAdapter` in
+  `scripts/lakehouse_adapter.py` (T-SQL/`INFORMATION_SCHEMA`/`sys.*`-based, `pyodbc`); new
+  `external_sources.sqlserver` block in `toolkit.yaml` (ambient credentials only -- names of
+  environment variables or Azure AD, never a secret value, matching how `databricks_connect`
+  already works); new `skills/data-discovery/references/sqlserver-profiling.md`. Zero changes
+  needed in `data-pipeline` -- a resulting bronze-landing contract already routes to
+  `lakeflow_connect` under the existing modality rubric, verified end-to-end. See DECISIONS.md
+  decision 57.
 
 ### Changed
 - `scripts/lakehouse_adapter.py`: replaced `DatabricksAdapter` (databricks-sql-connector, explicit

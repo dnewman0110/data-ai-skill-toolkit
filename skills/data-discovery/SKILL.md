@@ -47,7 +47,11 @@ explicitly when you finish a run.
 
 - **Greenfield**: input is prose business intent ("we need order-level revenue by region").
   Explore broadly for plausible candidate source tables/columns; every mapping you propose from
-  naming/structure alone is `mapping_type: llm_inferred` with a confidence score.
+  naming/structure alone is `mapping_type: llm_inferred` with a confidence score. This also covers
+  profiling a source BEFORE it's ingested into the lakehouse at all -- e.g. a SQL Server database a
+  team is about to build a pipeline from (`--backend sqlserver`; see
+  `references/sqlserver-profiling.md`) -- so real data-quality problems surface before anyone
+  spends engineering time on the ingestion design, not after.
 - **Resolution**: input is a `model-spec.json` from `data-modeling`. Resolve its facts/dimensions
   against real objects narrowly and specifically -- don't explore broadly, don't second-guess the
   design. Anything in the spec you cannot satisfy against real data goes in
@@ -60,9 +64,10 @@ Full detail, including how to tell which mode you're in and what "narrow" means 
 
 1. **Identify targets.** Greenfield: from the business intent, name candidate schema.table
    objects to explore (start from `list_tables` on the schemas the target catalog config points
-   at). Resolution: the target objects are implied by the model-spec's `source_to_target_mappings`
-   and dimension `source_mapping` fields -- go straight to those, don't explore beyond them unless
-   a mapping is missing entirely.
+   at) -- or, for a pre-ingestion SQL Server source, candidate `schema.table` objects in the
+   database named by `toolkit.yaml`'s `external_sources.sqlserver`. Resolution: the target objects
+   are implied by the model-spec's `source_to_target_mappings` and dimension `source_mapping`
+   fields -- go straight to those, don't explore beyond them unless a mapping is missing entirely.
 
 2. **Run the cost gate, then profile.** Run
    `${CLAUDE_SKILL_DIR}/scripts/build_findings.py` with `--target schema.table` for every
@@ -71,7 +76,16 @@ Full detail, including how to tell which mode you're in and what "narrow" means 
    fixture lakehouse in evals, or `--backend databricks_connect --catalog <name>` in production,
    which uses `DatabricksConnectAdapter` in `scripts/lakehouse_adapter.py` -- an already-
    authenticated Databricks Connect session in this environment, no separate credentials passed
-   in. Also pass `--max-rows-scanned` /
+   in. For a pre-ingestion SQL Server source, `--backend sqlserver` plus `--sqlserver-host`/
+   `--sqlserver-database`/`--sqlserver-driver`/`--sqlserver-port`/`--sqlserver-auth-mode` read
+   straight from `toolkit.yaml`'s `external_sources.sqlserver` block -- **every one of those is
+   non-secret connection shape, never a credential**. For `auth_mode: sql_auth_env`, also pass
+   `--sqlserver-username-env-var`/`--sqlserver-password-env-var`: these are environment variable
+   *names* from that same config block. Pass the names through exactly as configured -- never read,
+   resolve, print, or echo the environment variables' actual values yourself; `SqlServerAdapter`
+   resolves them internally, at connection time, and they never need to pass through you. See
+   `references/sqlserver-profiling.md` for auth-mode setup and what the resulting contract looks
+   like. Also pass `--max-rows-scanned` /
    `--max-bytes-scanned` from `toolkit.yaml`'s `cost_and_blast_radius` block and
    `--sensitive-columns-json` from its `sample_data.sensitive_columns`. This one command runs the
    pre-flight cost estimate, and **halts with exit code 1 and no profiling done** if the estimate
@@ -123,7 +137,12 @@ Full detail, including how to tell which mode you're in and what "narrow" means 
    - **Copy `proposed_tests` into each table's `tests[]`** as-is; they're already schema-shaped
      and already have a defensible `threshold_basis`.
 
-5. **Assemble `data-contract.json`** matching `contracts/data-contract.schema.json`, then validate
+5. **Assemble `data-contract.json`** matching `contracts/data-contract.schema.json`. For a
+   pre-ingestion SQL Server source, `source.object` is `<database>.<schema>.<table>` from the SQL
+   Server side and `target_catalog`/`target_schema` propose the bronze landing location (1:1
+   `explicit_alias` columns -- no reshaping at the landing stage) -- see
+   `references/sqlserver-profiling.md` for a worked example and why this shape is what routes
+   correctly into `data-pipeline`'s `lakeflow_connect` modality with no extra work. Then validate
    it:
    ```
    python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_artifact.py" <output>/data-contract.json --schema-type data-contract --supported-major 1
@@ -165,6 +184,9 @@ Full detail, including how to tell which mode you're in and what "narrow" means 
   `contracts/confidence-rubric.md`.
 - `references/profiling-and-cost-bounds.md` -- sampling strategy, row caps, what the cost gate
   checks and what to do when it says no.
+- `references/sqlserver-profiling.md` -- profiling a SQL Server source before it's ingested:
+  `external_sources.sqlserver` auth-mode setup, T-SQL/metadata differences worth knowing, the
+  `source.object` naming convention for a pre-ingestion contract, and what happens next.
 - `references/toolkit-conventions.md` -- cross-cutting rules shared by all five skills (read/write
   boundaries, secrets, client data isolation, cost gates, the deterministic/LLM boundary, human
   review gates, idempotency). Read this if you haven't already; it's referenced above throughout

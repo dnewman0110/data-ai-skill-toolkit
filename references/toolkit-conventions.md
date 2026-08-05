@@ -42,6 +42,14 @@ in plain language -- not just by reference to this file.
   its *own* purposes outside this toolkit, but no adapter in `scripts/lakehouse_adapter.py` reads one
   directly. Credentials are never inlined in `toolkit.yaml`, in generated code, or anywhere else in the
   repo.
+- Same rule, second worked example: `data-discovery`'s `SqlServerAdapter` (`external_sources.sqlserver`
+  in `toolkit.yaml`, see `skills/data-discovery/references/sqlserver-profiling.md`) is ambient the same
+  way -- `toolkit.yaml` names non-secret connection shape (host, port, database, driver, `auth_mode`) and,
+  for the one auth mode that needs a secret at all (`sql_auth_env`), only the *names* of environment
+  variables to read, never the values. The recommended `azure_ad_default` mode needs no credential
+  concept whatsoever, reusing whatever's already logged into Azure, the same posture as Databricks
+  Connect's OAuth session. Nothing secret is ever typed into a conversation, written to `toolkit.yaml`, or
+  passed as a CLI argument value the agent itself constructs.
 - Credentials, tokens, and connection strings never appear in: generated artifacts, logs, reports,
   prompts sent to an LLM, or anything written to the repo. If a script needs to log a connection attempt,
   it logs the secret *scope name*, never the resolved value.

@@ -996,4 +996,78 @@ just accepted on the subagent's word.
     which is also the semantically correct behavior (an all-key upsert has nothing to update on a
     match).
 
+57. **New feature: `data-discovery` can profile a SQL Server source before it's ingested into the
+    lakehouse at all** (greenfield mode, `--backend sqlserver`), so real data-quality problems
+    surface before anyone spends engineering time on the ingestion design, not after. Confirmed by
+    reading the code before building anything: greenfield mode was already fully backend-agnostic
+    in mechanism -- `build_findings.py`, `profile_object.py`, `propose_tests.py`, and
+    `estimate_scan_cost.py` only ever call `LakehouseAdapter`'s abstract interface, never a
+    backend-specific detail directly. That made this a third adapter (`SqlServerAdapter` in
+    `scripts/lakehouse_adapter.py`), not a new skill or invocation mode -- confirmed by the fact
+    that `build_findings()`, `profile_object.py`, `propose_tests.py`, and `estimate_scan_cost.py`
+    needed zero code changes.
+
+    **Credentials, per your explicit decision, are ambient -- same posture `DatabricksConnectAdapter`
+    already established** (`references/toolkit-conventions.md` #2). Your original framing ("user
+    provides credentials as part of the skill invocation") would have meant a secret typed into the
+    conversation -- directly against this toolkit's existing rule that credentials never appear in
+    chat, prompts, or `toolkit.yaml`. Landed instead on: `toolkit.yaml`'s new
+    `external_sources.sqlserver` block names non-secret connection shape (host, port, database,
+    driver) and an `auth_mode`; for the one mode that needs a secret at all (`sql_auth_env`), only
+    the *names* of environment variables to read, resolved by `SqlServerAdapter` itself at
+    connection time, never by the agent. `azure_ad_default` (the default, and the natural parallel
+    to Databricks Connect's own OAuth session, since a SQL Server in this toolkit's default
+    Databricks-on-Azure environment is plausibly Azure SQL Database/Managed Instance too) needs no
+    credential concept whatsoever -- `azure-identity`'s `DefaultAzureCredential` reuses whatever's
+    already logged in. `windows_integrated` covers on-prem, also credential-free.
+
+    **Config validation was reordered to happen before importing `pyodbc`** (`auth_mode` value,
+    env-var-name presence) -- a `toolkit.yaml` misconfiguration should fail with a clear message
+    regardless of whether `pyodbc` happens to be installed yet, not get masked by an unrelated
+    `ImportError`. This also happens to be what makes those two failure paths testable without
+    `pyodbc` installed at all (`skills/data-discovery/evals/run_assertions.py`'s mocked-connection
+    tests) -- a nice side effect of the fail-fast ordering, not the original motivation for it.
+
+    **T-SQL required real per-method translation, not just reused SQL with different table
+    addressing**: `TOP (n)` instead of `LIMIT`; `INFORMATION_SCHEMA.TABLES`/`.COLUMNS`/
+    `.KEY_COLUMN_USAGE`/`.TABLE_CONSTRAINTS`/`.REFERENTIAL_CONSTRAINTS`/`.CONSTRAINT_COLUMN_USAGE`
+    for tables/columns/PK/FK (SQL Server's documented, version-stable way to map an FK constraint
+    to the column it actually references -- confirmed this works via `INFORMATION_SCHEMA` alone
+    while writing the query, correcting an initial assumption in this feature's own plan that
+    `sys.foreign_keys` would be needed); `sys.extended_properties` (`MS_Description`) for column/
+    table comments, since SQL Server stores those as extended properties, not a first-class
+    `INFORMATION_SCHEMA` field; `sys.partitions`/`sys.dm_db_partition_stats` for the cheap,
+    no-full-scan row-count/size estimates `sp_spaceused` itself uses internally, matching
+    `estimate_bytes`' existing "cheap, no-full-read" contract on the other two adapters; `NOT
+    EXISTS` instead of `NOT IN` for the FK-orphan check, avoiding T-SQL's well-known trap where
+    `NOT IN` silently evaluates to `UNKNOWN` (reporting zero orphans, wrongly) the moment the
+    referenced-value subquery contains even one `NULL`.
+
+    **`data-contract.schema.json`: no change needed.** `source.object` was already a free-form
+    string -- confirmed by this toolkit's own `evals/fixtures/salesforce-bronze-contract.json`,
+    which already references `salesforce_source.crm.opportunity`, not a real Unity Catalog path.
+    Documented convention (`skills/data-discovery/references/sqlserver-profiling.md`):
+    `<database>.<schema>.<table>` from the SQL Server side; `target_catalog`/`target_schema`
+    propose the bronze landing location, 1:1 `explicit_alias` columns, same shape the Salesforce
+    fixture already demonstrates for a different managed connector.
+
+    **Zero changes needed in `data-pipeline` -- verified end-to-end, not just asserted.**
+    `references/decision-rubric.md`'s `source_is_managed_connector` factor already named SQL
+    Server explicitly as a Lakeflow Connect managed-connector example. Built a hand-written
+    SQL-Server-sourced bronze-landing contract, ran it through `recommend_modality.py` (chose
+    `lakeflow_connect`, as expected) and then all the way through
+    `build_pipeline_manifest.py`, which generated a real, correct `connector_config.yaml` stub --
+    confirming the integration point this feature plugs into actually closes the loop, not just
+    that the rubric factor happens to be named right.
+
+    **What's deliberately not built**: real verification against a live SQL Server (like
+    `DatabricksConnectAdapter`, decision 54, this can't be exercised by this toolkit's offline
+    evals -- no live database in CI; the same "implemented against documented APIs, not a test
+    run" framing applies, and the same "verify against a real instance before an engagement,
+    decision 54's own history is a direct precedent for real bugs a live run catches that no
+    amount of doc-reading would" advice applies too); `data-validation` reusing this adapter for
+    real post-ingestion source-vs-target comparison (flagged as valuable in the reference doc, not
+    built); any database beyond SQL Server (the interface is designed so a future one is a new
+    adapter class, not a rewrite, but only SQL Server was asked for).
+
 *(Further decisions will be appended here as later phases proceed.)*
